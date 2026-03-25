@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,7 +17,7 @@ import (
 func withStubbedLoginDeps(t *testing.T) {
 	t.Helper()
 
-	origLoad := loginLoadConfig
+	origLoad := loginLoadRuntimeConfig
 	origFetch := loginFetchQRCode
 	origPoll := loginPollQRStatus
 	origSave := loginSaveCredentials
@@ -25,7 +25,7 @@ func withStubbedLoginDeps(t *testing.T) {
 	origOut := loginOutputWriter
 
 	t.Cleanup(func() {
-		loginLoadConfig = origLoad
+		loginLoadRuntimeConfig = origLoad
 		loginFetchQRCode = origFetch
 		loginPollQRStatus = origPoll
 		loginSaveCredentials = origSave
@@ -49,11 +49,12 @@ func runLoginCommand(t *testing.T) (string, error) {
 	return out.String(), err
 }
 
-func TestRunLoginPersistsCredentialsWithoutStartingCodex(t *testing.T) {
+func TestRunLoginBootstrapsMissingConfigAndPrintsNotice(t *testing.T) {
 	withStubbedLoginDeps(t)
 
-	loginLoadConfig = func() (config.Config, error) {
-		return config.Config{WechatAccountsDir: filepath.Join(t.TempDir(), "accounts")}, errors.New("codex_command is required")
+	loginLoadRuntimeConfig = func(out io.Writer) (config.Config, error) {
+		fmt.Fprintln(out, defaultConfigCreatedNotice)
+		return config.Config{WechatAccountsDir: filepath.Join(t.TempDir(), "accounts")}, nil
 	}
 	loginFetchQRCode = func(ctx context.Context, baseURL string) (ilink.QRCodeResponse, error) {
 		return ilink.QRCodeResponse{QRCode: "qr-code", QRCodeImgContent: "qr-text"}, nil
@@ -72,93 +73,51 @@ func TestRunLoginPersistsCredentialsWithoutStartingCodex(t *testing.T) {
 		return nil
 	}
 
-	_, err := runLoginCommand(t)
+	output, err := runLoginCommand(t)
 	if err != nil {
 		t.Fatalf("expected login to succeed, got error: %v", err)
 	}
 	if saved != 1 {
 		t.Fatalf("expected credentials save to be called once, got %d", saved)
 	}
+	assertContains(t, output, defaultConfigCreatedNotice)
 }
 
-func TestRunLoginUsesWechatAccountsDirEvenWhenRuntimeConfigIsOtherwiseInvalid(t *testing.T) {
+func TestRunLoginReturnsBootstrapErrorForInvalidExistingConfig(t *testing.T) {
 	withStubbedLoginDeps(t)
 
-	accountsDir := filepath.Join(t.TempDir(), "accounts")
-	loginLoadConfig = func() (config.Config, error) {
-		return config.Config{WechatAccountsDir: accountsDir}, errors.New("permission_mode must be readonly")
+	bootstrapErr := errors.New("permission_mode must be readonly")
+	loginLoadRuntimeConfig = func(out io.Writer) (config.Config, error) {
+		return config.Config{WechatAccountsDir: filepath.Join(t.TempDir(), "accounts")}, bootstrapErr
 	}
 	loginFetchQRCode = func(ctx context.Context, baseURL string) (ilink.QRCodeResponse, error) {
-		return ilink.QRCodeResponse{QRCode: "qr-code", QRCodeImgContent: "qr-text"}, nil
+		t.Fatalf("fetch should not be called when runtime config bootstrap fails")
+		return ilink.QRCodeResponse{}, nil
 	}
 	loginPollQRStatus = func(ctx context.Context, baseURL string, qrCode string, onStatus func(string)) (ilink.Credentials, error) {
-		return ilink.Credentials{BotToken: "bot-token", ILinkBotID: "bot-id", BaseURL: "https://example.com", ILinkUserID: "user-id"}, nil
+		t.Fatalf("poll should not be called when runtime config bootstrap fails")
+		return ilink.Credentials{}, nil
 	}
-	usedCfg := config.Config{}
 	loginSaveCredentials = func(cfg config.Config, creds ilink.Credentials) error {
-		usedCfg = cfg
+		t.Fatalf("save should not be called when runtime config bootstrap fails")
 		return nil
 	}
 	loginRenderTerminalQRCode = func(out io.Writer, payload string) error {
+		t.Fatalf("render should not be called when runtime config bootstrap fails")
 		return nil
 	}
 
 	_, err := runLoginCommand(t)
-	if err != nil {
-		t.Fatalf("expected login to succeed, got error: %v", err)
-	}
-	if usedCfg.WechatAccountsDir != accountsDir {
-		t.Fatalf("expected WechatAccountsDir %q, got %q", accountsDir, usedCfg.WechatAccountsDir)
-	}
-}
-
-func TestRunLoginDoesNotTrustDecodedConfigForCredentialPathWhenConfigLoadUnreliable(t *testing.T) {
-	withStubbedLoginDeps(t)
-
-	for _, tc := range []struct {
-		name   string
-		cfgErr error
-	}{
-		{name: "decode error", cfgErr: errors.New("decode config file: invalid character")},
-		{name: "read error", cfgErr: errors.New("read config file: permission denied")},
-		{name: "home resolution error", cfgErr: errors.New("resolve home dir: unavailable")},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			accountsDir := filepath.Join(t.TempDir(), "accounts")
-			loginLoadConfig = func() (config.Config, error) {
-				return config.Config{WechatAccountsDir: accountsDir}, tc.cfgErr
-			}
-			loginFetchQRCode = func(ctx context.Context, baseURL string) (ilink.QRCodeResponse, error) {
-				return ilink.QRCodeResponse{QRCode: "qr-code", QRCodeImgContent: "qr-text"}, nil
-			}
-			loginPollQRStatus = func(ctx context.Context, baseURL string, qrCode string, onStatus func(string)) (ilink.Credentials, error) {
-				return ilink.Credentials{BotToken: "bot-token", ILinkBotID: "bot-id", BaseURL: "https://example.com", ILinkUserID: "user-id"}, nil
-			}
-			usedCfg := config.Config{}
-			loginSaveCredentials = func(cfg config.Config, creds ilink.Credentials) error {
-				usedCfg = cfg
-				return nil
-			}
-			loginRenderTerminalQRCode = func(out io.Writer, payload string) error {
-				return nil
-			}
-
-			_, err := runLoginCommand(t)
-			if err != nil {
-				t.Fatalf("expected login to succeed, got error: %v", err)
-			}
-			if usedCfg.WechatAccountsDir != "" {
-				t.Fatalf("expected WechatAccountsDir to be cleared for unreliable config errors, got %q", usedCfg.WechatAccountsDir)
-			}
-		})
+	if !errors.Is(err, bootstrapErr) {
+		t.Fatalf("expected bootstrap error %v, got %v", bootstrapErr, err)
 	}
 }
 
 func TestRunLoginDisplaysQRCodeAndPollingStatus(t *testing.T) {
 	withStubbedLoginDeps(t)
 
-	loginLoadConfig = func() (config.Config, error) {
-		return config.Config{}, os.ErrNotExist
+	loginLoadRuntimeConfig = func(out io.Writer) (config.Config, error) {
+		return config.Config{}, nil
 	}
 	loginFetchQRCode = func(ctx context.Context, baseURL string) (ilink.QRCodeResponse, error) {
 		return ilink.QRCodeResponse{QRCode: "qr-code", QRCodeImgContent: "qr-text"}, nil
@@ -187,11 +146,37 @@ func TestRunLoginDisplaysQRCodeAndPollingStatus(t *testing.T) {
 	assertContains(t, output, "QR status: confirmed")
 }
 
+func TestRunLoginUsesDefaultRendererAndDoesNotFallbackToURLText(t *testing.T) {
+	withStubbedLoginDeps(t)
+
+	loginLoadRuntimeConfig = func(out io.Writer) (config.Config, error) {
+		return config.Config{}, nil
+	}
+	loginFetchQRCode = func(ctx context.Context, baseURL string) (ilink.QRCodeResponse, error) {
+		return ilink.QRCodeResponse{QRCode: "qr-code", QRCodeImgContent: "https://example.com/login-qr"}, nil
+	}
+	loginPollQRStatus = func(ctx context.Context, baseURL string, qrCode string, onStatus func(string)) (ilink.Credentials, error) {
+		return ilink.Credentials{BotToken: "bot-token", ILinkBotID: "bot-id", BaseURL: "https://example.com", ILinkUserID: "user-id"}, nil
+	}
+	loginSaveCredentials = func(cfg config.Config, creds ilink.Credentials) error {
+		return nil
+	}
+
+	output, err := runLoginCommand(t)
+	if err != nil {
+		t.Fatalf("expected login to succeed, got error: %v", err)
+	}
+	assertContains(t, output, "Scan the QR code to login:")
+	if strings.Contains(output, "https://example.com/login-qr") {
+		t.Fatalf("expected default terminal QR renderer output, got URL fallback text: %s", output)
+	}
+}
+
 func TestRunLoginPrintsQRCodeTextWhenRendererUnavailable(t *testing.T) {
 	withStubbedLoginDeps(t)
 
-	loginLoadConfig = func() (config.Config, error) {
-		return config.Config{}, os.ErrNotExist
+	loginLoadRuntimeConfig = func(out io.Writer) (config.Config, error) {
+		return config.Config{}, nil
 	}
 	loginFetchQRCode = func(ctx context.Context, baseURL string) (ilink.QRCodeResponse, error) {
 		return ilink.QRCodeResponse{QRCode: "qr-code", QRCodeImgContent: "fallback-qr-text"}, nil
@@ -219,8 +204,8 @@ func TestRunLoginFallsBackToDefaultCredentialsPathWhenConfigMissing(t *testing.T
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	loginLoadConfig = func() (config.Config, error) {
-		return config.Config{}, os.ErrNotExist
+	loginLoadRuntimeConfig = func(out io.Writer) (config.Config, error) {
+		return config.Config{}, nil
 	}
 	loginFetchQRCode = func(ctx context.Context, baseURL string) (ilink.QRCodeResponse, error) {
 		return ilink.QRCodeResponse{QRCode: "qr-code", QRCodeImgContent: "qr-text"}, nil
@@ -256,8 +241,8 @@ func TestRunLoginReturnsFetchQRCodeError(t *testing.T) {
 	withStubbedLoginDeps(t)
 
 	wantErr := errors.New("fetch failed")
-	loginLoadConfig = func() (config.Config, error) {
-		return config.Config{}, os.ErrNotExist
+	loginLoadRuntimeConfig = func(out io.Writer) (config.Config, error) {
+		return config.Config{}, nil
 	}
 	loginFetchQRCode = func(ctx context.Context, baseURL string) (ilink.QRCodeResponse, error) {
 		return ilink.QRCodeResponse{}, wantErr
@@ -284,8 +269,8 @@ func TestRunLoginReturnsFetchQRCodeError(t *testing.T) {
 func TestRunLoginReturnsErrorForIncompleteFetchQRCodeResponse(t *testing.T) {
 	withStubbedLoginDeps(t)
 
-	loginLoadConfig = func() (config.Config, error) {
-		return config.Config{}, os.ErrNotExist
+	loginLoadRuntimeConfig = func(out io.Writer) (config.Config, error) {
+		return config.Config{}, nil
 	}
 	loginFetchQRCode = func(ctx context.Context, baseURL string) (ilink.QRCodeResponse, error) {
 		return ilink.QRCodeResponse{QRCode: "", QRCodeImgContent: "qr-text"}, nil
@@ -319,8 +304,8 @@ func TestRunLoginReturnsPollError(t *testing.T) {
 	withStubbedLoginDeps(t)
 
 	wantErr := errors.New("poll failed")
-	loginLoadConfig = func() (config.Config, error) {
-		return config.Config{}, os.ErrNotExist
+	loginLoadRuntimeConfig = func(out io.Writer) (config.Config, error) {
+		return config.Config{}, nil
 	}
 	loginFetchQRCode = func(ctx context.Context, baseURL string) (ilink.QRCodeResponse, error) {
 		return ilink.QRCodeResponse{QRCode: "qr-code", QRCodeImgContent: "qr-text"}, nil
@@ -346,8 +331,8 @@ func TestRunLoginReturnsSaveError(t *testing.T) {
 	withStubbedLoginDeps(t)
 
 	wantErr := errors.New("save failed")
-	loginLoadConfig = func() (config.Config, error) {
-		return config.Config{}, os.ErrNotExist
+	loginLoadRuntimeConfig = func(out io.Writer) (config.Config, error) {
+		return config.Config{}, nil
 	}
 	loginFetchQRCode = func(ctx context.Context, baseURL string) (ilink.QRCodeResponse, error) {
 		return ilink.QRCodeResponse{QRCode: "qr-code", QRCodeImgContent: "qr-text"}, nil

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xiongzhe/weCodex/codexacp"
+	"github.com/xiongzhe/weCodex/backend"
 	"github.com/xiongzhe/weCodex/ilink"
 )
 
@@ -24,7 +24,7 @@ func TestNewServicePanicsOnNilACP(t *testing.T) {
 
 func TestHandleMessageReusesSessionPerSender(t *testing.T) {
 	acp := &stubACPClient{}
-	acp.promptFn = func(_ context.Context, req codexacp.PromptRequest) (codexacp.PromptResult, error) {
+	acp.promptFn = func(_ context.Context, req backend.PromptRequest) (backend.PromptResult, error) {
 		switch len(acp.PromptCalls()) {
 		case 1:
 			if req.SessionID != "" {
@@ -33,15 +33,15 @@ func TestHandleMessageReusesSessionPerSender(t *testing.T) {
 			if req.Timeout != 120*time.Second {
 				t.Fatalf("first prompt should use 120s timeout, got %s", req.Timeout)
 			}
-			return codexacp.PromptResult{SessionID: "s1", ReplyText: "r1"}, nil
+			return backend.PromptResult{SessionID: "s1", ReplyText: "r1"}, nil
 		case 2:
 			if req.SessionID != "s1" {
 				t.Fatalf("second prompt should reuse s1, got %q", req.SessionID)
 			}
-			return codexacp.PromptResult{SessionID: "s1", ReplyText: "r2"}, nil
+			return backend.PromptResult{SessionID: "s1", ReplyText: "r2"}, nil
 		default:
 			t.Fatalf("unexpected extra prompt call")
-			return codexacp.PromptResult{}, nil
+			return backend.PromptResult{}, nil
 		}
 	}
 
@@ -60,27 +60,27 @@ func TestHandleMessageReusesSessionPerSender(t *testing.T) {
 
 func TestHandleMessageKeepsSeparateSessionsPerSender(t *testing.T) {
 	acp := &stubACPClient{}
-	acp.promptFn = func(_ context.Context, req codexacp.PromptRequest) (codexacp.PromptResult, error) {
+	acp.promptFn = func(_ context.Context, req backend.PromptRequest) (backend.PromptResult, error) {
 		switch req.SenderID {
 		case "u1":
 			if len(callsBySender(acp.PromptCalls(), "u1")) == 1 {
 				if req.SessionID != "" {
 					t.Fatalf("u1 first should be empty session, got %q", req.SessionID)
 				}
-				return codexacp.PromptResult{SessionID: "s-u1", ReplyText: "ok"}, nil
+				return backend.PromptResult{SessionID: "s-u1", ReplyText: "ok"}, nil
 			}
 			if req.SessionID != "s-u1" {
 				t.Fatalf("u1 should reuse s-u1, got %q", req.SessionID)
 			}
-			return codexacp.PromptResult{SessionID: "s-u1", ReplyText: "ok"}, nil
+			return backend.PromptResult{SessionID: "s-u1", ReplyText: "ok"}, nil
 		case "u2":
 			if req.SessionID != "" {
 				t.Fatalf("u2 first should be empty session, got %q", req.SessionID)
 			}
-			return codexacp.PromptResult{SessionID: "s-u2", ReplyText: "ok"}, nil
+			return backend.PromptResult{SessionID: "s-u2", ReplyText: "ok"}, nil
 		default:
 			t.Fatalf("unexpected sender %q", req.SenderID)
-			return codexacp.PromptResult{}, nil
+			return backend.PromptResult{}, nil
 		}
 	}
 
@@ -92,8 +92,8 @@ func TestHandleMessageKeepsSeparateSessionsPerSender(t *testing.T) {
 
 func TestHandleMessageReusesInboundAddressingOnPromptReply(t *testing.T) {
 	acp := &stubACPClient{}
-	acp.promptFn = func(_ context.Context, _ codexacp.PromptRequest) (codexacp.PromptResult, error) {
-		return codexacp.PromptResult{SessionID: "s1", ReplyText: "reply"}, nil
+	acp.promptFn = func(_ context.Context, _ backend.PromptRequest) (backend.PromptResult, error) {
+		return backend.PromptResult{SessionID: "s1", ReplyText: "reply"}, nil
 	}
 
 	svc := NewService(acp)
@@ -114,7 +114,7 @@ func TestHandleMessageReusesInboundAddressingOnPromptReply(t *testing.T) {
 }
 
 func TestHandleMessageHelpStatusAndNew(t *testing.T) {
-	acp := &stubACPClient{health: codexacp.HealthSnapshot{State: codexacp.HealthReady, LastErrorSummary: ""}}
+	acp := &stubACPClient{health: backend.HealthSnapshot{State: backend.HealthReady, LastErrorSummary: ""}}
 	svc := NewService(acp)
 
 	help, err := svc.HandleMessage(context.Background(), ilink.InboundMessage{FromUserID: "u", ContextToken: "c", Text: "/help"})
@@ -129,15 +129,15 @@ func TestHandleMessageHelpStatusAndNew(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	if !strings.Contains(status.Text, "acp state: ready") {
+	if !strings.Contains(status.Text, "backend state: ready") {
 		t.Fatalf("status should include health state, got %q", status.Text)
 	}
 	if !strings.Contains(status.Text, "permission mode: read-only") {
 		t.Fatalf("status should include read-only permission mode, got %q", status.Text)
 	}
 
-	acp.promptFn = func(_ context.Context, _ codexacp.PromptRequest) (codexacp.PromptResult, error) {
-		return codexacp.PromptResult{SessionID: "s1", ReplyText: "ok"}, nil
+	acp.promptFn = func(_ context.Context, _ backend.PromptRequest) (backend.PromptResult, error) {
+		return backend.PromptResult{SessionID: "s1", ReplyText: "ok"}, nil
 	}
 	_, _ = svc.HandleMessage(context.Background(), ilink.InboundMessage{FromUserID: "u", Text: "hello"})
 	if !svc.HasActiveSession("u") {
@@ -158,13 +158,13 @@ func TestHandleMessageGlobalBusyLockOnNormalPrompts(t *testing.T) {
 	release := make(chan struct{})
 
 	acp := &stubACPClient{}
-	acp.promptFn = func(_ context.Context, req codexacp.PromptRequest) (codexacp.PromptResult, error) {
+	acp.promptFn = func(_ context.Context, req backend.PromptRequest) (backend.PromptResult, error) {
 		if req.Text == "first" {
 			entered <- struct{}{}
 			<-release
-			return codexacp.PromptResult{SessionID: "s1", ReplyText: "done"}, nil
+			return backend.PromptResult{SessionID: "s1", ReplyText: "done"}, nil
 		}
-		return codexacp.PromptResult{SessionID: "s2", ReplyText: "other"}, nil
+		return backend.PromptResult{SessionID: "s2", ReplyText: "other"}, nil
 	}
 
 	svc := NewService(acp)
@@ -193,13 +193,13 @@ func TestHandleMessageGlobalBusyLockOnNormalPrompts(t *testing.T) {
 func TestHandleMessageHelpAndStatusBypassBusyLock(t *testing.T) {
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
-	acp := &stubACPClient{health: codexacp.HealthSnapshot{State: codexacp.HealthDegraded, LastErrorSummary: "x"}}
-	acp.promptFn = func(_ context.Context, req codexacp.PromptRequest) (codexacp.PromptResult, error) {
+	acp := &stubACPClient{health: backend.HealthSnapshot{State: backend.HealthDegraded, LastErrorSummary: "x"}}
+	acp.promptFn = func(_ context.Context, req backend.PromptRequest) (backend.PromptResult, error) {
 		if req.Text == "hold" {
 			entered <- struct{}{}
 			<-release
 		}
-		return codexacp.PromptResult{SessionID: "s", ReplyText: "ok"}, nil
+		return backend.PromptResult{SessionID: "s", ReplyText: "ok"}, nil
 	}
 
 	svc := NewService(acp)
@@ -222,7 +222,7 @@ func TestHandleMessageHelpAndStatusBypassBusyLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status during busy: %v", err)
 	}
-	if !strings.Contains(statusOut.Text, "acp state:") {
+	if !strings.Contains(statusOut.Text, "backend state:") {
 		t.Fatalf("unexpected status text: %q", statusOut.Text)
 	}
 
@@ -238,21 +238,21 @@ func TestHandleMessageNewRejectedOnlyForBusyLockHolder(t *testing.T) {
 	release := make(chan struct{})
 
 	acp := &stubACPClient{}
-	acp.promptFn = func(_ context.Context, req codexacp.PromptRequest) (codexacp.PromptResult, error) {
+	acp.promptFn = func(_ context.Context, req backend.PromptRequest) (backend.PromptResult, error) {
 		switch req.SenderID {
 		case "u1":
 			if req.Text == "prep" {
-				return codexacp.PromptResult{SessionID: "s-u1", ReplyText: "ok"}, nil
+				return backend.PromptResult{SessionID: "s-u1", ReplyText: "ok"}, nil
 			}
 			if req.Text == "hold" {
 				entered <- struct{}{}
 				<-release
-				return codexacp.PromptResult{SessionID: "s-u1", ReplyText: "ok"}, nil
+				return backend.PromptResult{SessionID: "s-u1", ReplyText: "ok"}, nil
 			}
 		case "u2":
-			return codexacp.PromptResult{SessionID: "s-u2", ReplyText: "ok"}, nil
+			return backend.PromptResult{SessionID: "s-u2", ReplyText: "ok"}, nil
 		}
-		return codexacp.PromptResult{SessionID: "s", ReplyText: "ok"}, nil
+		return backend.PromptResult{SessionID: "s", ReplyText: "ok"}, nil
 	}
 
 	svc := NewService(acp)
@@ -294,20 +294,20 @@ func TestHandleMessageNewRejectedOnlyForBusyLockHolder(t *testing.T) {
 
 func TestHandleMessageIdleNewCreatesFreshSessionOnNextPrompt(t *testing.T) {
 	acp := &stubACPClient{}
-	acp.promptFn = func(_ context.Context, req codexacp.PromptRequest) (codexacp.PromptResult, error) {
+	acp.promptFn = func(_ context.Context, req backend.PromptRequest) (backend.PromptResult, error) {
 		if req.Text == "first" {
 			if req.SessionID != "" {
 				t.Fatalf("first prompt session should be empty, got %q", req.SessionID)
 			}
-			return codexacp.PromptResult{SessionID: "s1", ReplyText: "ok"}, nil
+			return backend.PromptResult{SessionID: "s1", ReplyText: "ok"}, nil
 		}
 		if req.Text == "second" {
 			if req.SessionID != "" {
 				t.Fatalf("second prompt should start fresh after /new, got %q", req.SessionID)
 			}
-			return codexacp.PromptResult{SessionID: "s2", ReplyText: "ok"}, nil
+			return backend.PromptResult{SessionID: "s2", ReplyText: "ok"}, nil
 		}
-		return codexacp.PromptResult{}, nil
+		return backend.PromptResult{}, nil
 	}
 
 	svc := NewService(acp)
@@ -330,10 +330,10 @@ func TestHandleMessageFailurePathsClearSessionAndReuseAddressing(t *testing.T) {
 		wantText    string
 		wantNot     string
 	}{
-		{name: "timeout", err: &codexacp.PromptTimeoutError{Err: context.DeadlineExceeded}, wantText: "超时"},
-		{name: "session", err: &codexacp.SessionError{Err: errors.New("broken session")}, wantText: "会话"},
-		{name: "permission", err: &codexacp.PermissionError{Err: errors.New("tool not allowed")}, wantText: "tool not allowed", wantNot: "超时"},
-		{name: "prompt", err: &codexacp.PromptError{Err: errors.New("prompt failed")}, wantText: "失败"},
+		{name: "timeout", err: &backend.PromptTimeoutError{Err: context.DeadlineExceeded}, wantText: "超时"},
+		{name: "session", err: &backend.SessionError{Err: errors.New("broken session")}, wantText: "会话"},
+		{name: "permission", err: &backend.PermissionError{Err: errors.New("tool not allowed")}, wantText: "tool not allowed", wantNot: "超时"},
+		{name: "prompt", err: &backend.PromptError{Err: errors.New("prompt failed")}, wantText: "失败"},
 		{name: "generic", err: errors.New("boom"), wantText: "失败"},
 		{name: "empty_reply_success", successText: "   ", wantText: "失败"},
 	}
@@ -342,18 +342,18 @@ func TestHandleMessageFailurePathsClearSessionAndReuseAddressing(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			acp := &stubACPClient{}
 			call := 0
-			acp.promptFn = func(_ context.Context, req codexacp.PromptRequest) (codexacp.PromptResult, error) {
+			acp.promptFn = func(_ context.Context, req backend.PromptRequest) (backend.PromptResult, error) {
 				call++
 				if call == 1 {
-					return codexacp.PromptResult{SessionID: "s1", ReplyText: "ok"}, nil
+					return backend.PromptResult{SessionID: "s1", ReplyText: "ok"}, nil
 				}
 				if req.SessionID != "s1" {
 					t.Fatalf("expected to reuse s1 before failure, got %q", req.SessionID)
 				}
 				if tc.err != nil {
-					return codexacp.PromptResult{}, tc.err
+					return backend.PromptResult{}, tc.err
 				}
-				return codexacp.PromptResult{SessionID: "s1", ReplyText: tc.successText}, nil
+				return backend.PromptResult{SessionID: "s1", ReplyText: tc.successText}, nil
 			}
 
 			svc := NewService(acp)
@@ -385,8 +385,8 @@ func TestHandleMessageFailurePathsClearSessionAndReuseAddressing(t *testing.T) {
 
 func TestHandleMessagePermissionDenyThenFinalAnswerReturnsFinalOnly(t *testing.T) {
 	acp := &stubACPClient{}
-	acp.promptFn = func(_ context.Context, _ codexacp.PromptRequest) (codexacp.PromptResult, error) {
-		return codexacp.PromptResult{SessionID: "s", ReplyText: "final answer"}, nil
+	acp.promptFn = func(_ context.Context, _ backend.PromptRequest) (backend.PromptResult, error) {
+		return backend.PromptResult{SessionID: "s", ReplyText: "final answer"}, nil
 	}
 
 	svc := NewService(acp)
@@ -404,37 +404,41 @@ func TestHandleMessagePermissionDenyThenFinalAnswerReturnsFinalOnly(t *testing.T
 
 type stubACPClient struct {
 	mu       sync.Mutex
-	calls    []codexacp.PromptRequest
-	promptFn func(ctx context.Context, req codexacp.PromptRequest) (codexacp.PromptResult, error)
-	health    codexacp.HealthSnapshot
+	calls    []backend.PromptRequest
+	promptFn func(ctx context.Context, req backend.PromptRequest) (backend.PromptResult, error)
+	health    backend.HealthSnapshot
 }
 
-func (s *stubACPClient) Prompt(ctx context.Context, req codexacp.PromptRequest) (codexacp.PromptResult, error) {
+func (s *stubACPClient) Start(_ context.Context) error { return nil }
+
+func (s *stubACPClient) Stop() error { return nil }
+
+func (s *stubACPClient) Prompt(ctx context.Context, req backend.PromptRequest) (backend.PromptResult, error) {
 	s.mu.Lock()
 	s.calls = append(s.calls, req)
 	fn := s.promptFn
 	s.mu.Unlock()
 
 	if fn == nil {
-		return codexacp.PromptResult{SessionID: "default", ReplyText: "ok"}, nil
+		return backend.PromptResult{SessionID: "default", ReplyText: "ok"}, nil
 	}
 	return fn(ctx, req)
 }
 
-func (s *stubACPClient) Health() codexacp.HealthSnapshot {
+func (s *stubACPClient) Health() backend.HealthSnapshot {
 	return s.health
 }
 
-func (s *stubACPClient) PromptCalls() []codexacp.PromptRequest {
+func (s *stubACPClient) PromptCalls() []backend.PromptRequest {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]codexacp.PromptRequest, len(s.calls))
+	out := make([]backend.PromptRequest, len(s.calls))
 	copy(out, s.calls)
 	return out
 }
 
-func callsBySender(calls []codexacp.PromptRequest, sender string) []codexacp.PromptRequest {
-	var out []codexacp.PromptRequest
+func callsBySender(calls []backend.PromptRequest, sender string) []backend.PromptRequest {
+	var out []backend.PromptRequest
 	for _, c := range calls {
 		if c.SenderID == sender {
 			out = append(out, c)
@@ -448,13 +452,13 @@ func TestHandleMessageBusyDoesNotQueueAndSecondCanRunAfterFirstFinishes(t *testi
 	release := make(chan struct{})
 
 	acp := &stubACPClient{}
-	acp.promptFn = func(_ context.Context, req codexacp.PromptRequest) (codexacp.PromptResult, error) {
+	acp.promptFn = func(_ context.Context, req backend.PromptRequest) (backend.PromptResult, error) {
 		if req.Text == "first" {
 			entered <- struct{}{}
 			<-release
-			return codexacp.PromptResult{SessionID: "s1", ReplyText: "done"}, nil
+			return backend.PromptResult{SessionID: "s1", ReplyText: "done"}, nil
 		}
-		return codexacp.PromptResult{SessionID: "s2", ReplyText: "done2"}, nil
+		return backend.PromptResult{SessionID: "s2", ReplyText: "done2"}, nil
 	}
 
 	svc := NewService(acp)

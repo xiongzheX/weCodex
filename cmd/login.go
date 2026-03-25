@@ -5,21 +5,28 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
+	"github.com/skip2/go-qrcode"
 	"github.com/spf13/cobra"
-	"github.com/xiongzhe/weCodex/config"
 	"github.com/xiongzhe/weCodex/ilink"
 )
 
 var (
-	loginLoadConfig = config.Load
-	loginFetchQRCode = ilink.FetchQRCode
-	loginPollQRStatus = ilink.PollQRStatus
-	loginSaveCredentials = ilink.SaveCredentials
+	loginLoadRuntimeConfig = loadRuntimeConfig
+	loginFetchQRCode       = ilink.FetchQRCode
+	loginPollQRStatus      = ilink.PollQRStatus
+	loginSaveCredentials   = ilink.SaveCredentials
 	loginRenderTerminalQRCode = func(out io.Writer, payload string) error {
-		return errors.New("terminal QR renderer unavailable")
+		if strings.TrimSpace(payload) == "" {
+			return errors.New("terminal QR renderer unavailable")
+		}
+		qr, err := qrcode.New(payload, qrcode.Medium)
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprint(out, qr.ToSmallString(false))
+		return err
 	}
 	loginOutputWriter = func(cmd *cobra.Command) io.Writer {
 		return cmd.OutOrStdout()
@@ -37,11 +44,9 @@ var loginCmd = &cobra.Command{
 func runLogin(ctx context.Context, cmd *cobra.Command) error {
 	out := loginOutputWriter(cmd)
 
-	cfg, cfgErr := loginLoadConfig()
-	if cfgErr != nil {
-		if errors.Is(cfgErr, os.ErrNotExist) || !canUseDecodedConfigForDependentChecks(cfgErr) {
-			cfg = config.Config{}
-		}
+	cfg, err := loginLoadRuntimeConfig(out)
+	if err != nil {
+		return err
 	}
 
 	qrResp, err := loginFetchQRCode(ctx, "")

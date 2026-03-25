@@ -10,11 +10,13 @@ import (
 	"github.com/xiongzhe/weCodex/config"
 )
 
+var statusLoadRuntimeConfig = loadRuntimeConfig
+
 var statusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show static readiness status",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		cfg, cfgErr := config.Load()
+		cfg, cfgErr := statusLoadRuntimeConfig(cmd.OutOrStdout())
 
 		configPresent := cfgErr == nil
 		if cfgErr != nil && !errors.Is(cfgErr, os.ErrNotExist) {
@@ -40,7 +42,8 @@ var statusCmd = &cobra.Command{
 			codexErr = errors.New("skipped because config could not be loaded reliably")
 		}
 
-		summary := BuildReadinessSummary(configPresent, credentialsPresent, codexPresent, cfgErr, codexErr)
+		backendStatus := readinessBackendStatus(cfg, cfgErr)
+		summary := BuildReadinessSummary(backendStatus, configPresent, credentialsPresent, codexPresent, cfgErr, codexErr)
 		if credentialsErr != nil {
 			summary += "\ncredentials error: " + credentialsErr.Error()
 		}
@@ -49,7 +52,7 @@ var statusCmd = &cobra.Command{
 	},
 }
 
-func BuildReadinessSummary(configPresent bool, credentialsPresent bool, codexPresent bool, configErr error, codexErr error) string {
+func BuildReadinessSummary(backendStatus string, configPresent bool, credentialsPresent bool, codexPresent bool, configErr error, codexErr error) string {
 	configStatus := "missing"
 	switch {
 	case configErr != nil && !errors.Is(configErr, os.ErrNotExist):
@@ -80,6 +83,7 @@ func BuildReadinessSummary(configPresent bool, credentialsPresent bool, codexPre
 
 	lines := []string{
 		"static checks only",
+		"backend: " + backendStatus,
 		"config: " + configStatus,
 		"credentials: " + credentialsStatus,
 		"codex command: " + codexStatus,
@@ -103,4 +107,19 @@ func canUseDecodedConfigForDependentChecks(configErr error) bool {
 
 	msg := configErr.Error()
 	return !strings.Contains(msg, "decode config file:") && !strings.Contains(msg, "read config file:") && !strings.Contains(msg, "resolve home dir:")
+}
+
+func readinessBackendStatus(cfg config.Config, configErr error) string {
+	if errors.Is(configErr, os.ErrNotExist) {
+		return "unknown"
+	}
+	if configErr != nil && !canUseDecodedConfigForDependentChecks(configErr) {
+		return "unknown"
+	}
+
+	backendType := cfg.BackendType
+	if backendType == "" {
+		backendType = "acp"
+	}
+	return backendType
 }

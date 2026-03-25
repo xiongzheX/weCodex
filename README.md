@@ -1,8 +1,8 @@
 # weCodex
 
-weCodex 是一个独立的 Go CLI，用来把微信消息桥接到 Codex ACP 子进程。
+weCodex 是一个独立的 Go CLI，用来把微信消息桥接到本地 Codex 运行时。
 
-当前版本聚焦文本对话 MVP：在微信里发送消息，桥接器把消息转给本地 `codex acp`，再把回复发回微信。
+当前版本聚焦文本对话 MVP：在微信里发送消息，桥接器把消息转给本地 Codex 后端，再把回复发回微信。当前支持两种后端：`codex acp` 和 `codex exec`。
 
 ## 当前能力
 
@@ -10,7 +10,8 @@ weCodex 是一个独立的 Go CLI，用来把微信消息桥接到 Codex ACP 子
 - 通过 iLink 二维码登录并本地保存凭证
 - 为每个微信用户维护一个本地会话
 - 支持微信侧本地命令：`/help`、`/status`、`/new`
-- 只允许 `readonly` 权限模式启动 Codex ACP
+- 支持 `acp` 和 `cli` 两种 Codex 后端
+- 只允许 `readonly` 权限模式启动
 
 ## 环境要求
 
@@ -18,10 +19,35 @@ weCodex 是一个独立的 Go CLI，用来把微信消息桥接到 Codex ACP 子
 - 本机可执行的 Codex CLI
 - 可用的微信 iLink 登录环境
 
+## 安装
+
+### 方式 1：Go install
+
+```bash
+go install github.com/xiongzheX/weCodex/cmd/wecodex@latest
+```
+
+### 方式 2：Darwin 安装脚本（macOS）
+
+仓库内脚本路径：`scripts/install.sh`
+
+```bash
+bash scripts/install.sh
+```
+
+安装脚本行为：
+
+- 仅支持 Darwin（macOS）
+- 自动识别 `arm64` / `amd64`
+- 从 GitHub Releases 下载最新资产：`wecodex-darwin-${arch}.tar.gz`
+- 在当前 `PATH` 中选择**第一个可写且已存在**的目录作为安装目录
+- 安装 `wecodex` 可执行文件
+- 同时安装 `weCodex` 兼容别名（兼容旧命令名）
+
 ## 构建
 
 ```bash
-go build -o weCodex .
+go build -o wecodex .
 ```
 
 也可以直接运行：
@@ -34,32 +60,42 @@ go run . --help
 
 默认配置文件路径：`~/.weCodex/config.json`
 
-最小可用配置示例：
+`wecodex status`、`wecodex login`、`wecodex start` 在首次运行时，如果配置文件不存在，会自动创建默认配置。
+
+默认配置 JSON（精确字段）如下：
 
 ```json
 {
+  "backend_type": "cli",
   "codex_command": "codex",
-  "codex_args": ["acp"],
-  "working_directory": "/absolute/path/to/your/project",
+  "codex_args": [],
+  "working_directory": "<启动命令时的当前终端目录>",
+  "working_directory_mode": "auto",
   "permission_mode": "readonly"
 }
 ```
 
 字段说明：
 
+- `backend_type`：可选；`acp` 或 `cli`，未设置时默认按 `acp` 处理
 - `codex_command`：Codex 可执行文件名或绝对路径
-- `codex_args`：启动 ACP 时传给 Codex 的参数，当前应为 `['acp']`，实际 JSON 写法见上面的示例
+- `codex_args`：传给 Codex 的附加参数；`acp` 后端必须包含启动 ACP 所需参数，`cli` 后端可以为空
 - `working_directory`：Codex 执行时使用的工作目录
+- `working_directory_mode`：`auto` 或 `manual`
+  - `auto`：每次命令启动时，自动同步为当前终端目录
+  - `manual`：保持配置文件中的 `working_directory` 不变
 - `permission_mode`：当前必须是 `readonly`
 - `wechat_accounts_dir`：可选，自定义微信凭证目录；未设置时默认写入 `~/.weCodex`
 - `log_level`：可选；当前版本可省略
+
+推荐在 `codex acp` 可用时使用 `acp` 后端；如果本机 Codex CLI 不支持 `acp`，改用 `cli` 后端。
 
 ## 使用流程
 
 ### 1. 检查静态就绪状态
 
 ```bash
-./weCodex status
+wecodex status
 ```
 
 这个命令只做静态检查，不会真正启动桥接器。它会检查：
@@ -73,7 +109,7 @@ go run . --help
 ### 2. 登录微信 iLink
 
 ```bash
-./weCodex login
+wecodex login
 ```
 
 执行后会：
@@ -96,7 +132,7 @@ Login succeeded.
 ### 3. 启动桥接器
 
 ```bash
-./weCodex start
+wecodex start
 ```
 
 启动后会在前台运行，并输出：
@@ -112,7 +148,7 @@ running in foreground; bridge stays attached to this terminal until interrupted
 桥接器启动后，在微信里可以发送以下本地命令：
 
 - `/help`：查看本地命令帮助
-- `/status`：查看桥接器运行状态、ACP 状态、当前是否有活动会话
+- `/status`：查看桥接器运行状态、后端状态、当前是否有活动会话
 - `/new`：重置当前用户的本地会话，开始新会话
 
 除以上命令外，其余文本都会作为普通 prompt 转发给 Codex。
@@ -121,7 +157,8 @@ running in foreground; bridge stays attached to this terminal until interrupted
 
 - 桥接器以**前台模式**运行，不会自行 daemonize
 - 当前只支持 **read-only** 权限模型
-- 每个微信用户会维持一个本地会话，直到主动 `/new` 或发生错误重置
+- ACP 后端会为每个微信用户维持一个本地会话，直到主动 `/new` 或发生错误重置
+- CLI 后端是无状态的；`/new` 只会清理桥接器本地记录，不会重置 Codex CLI 里的远端会话
 - 单次 prompt 超时时间为 **120 秒**
 - 当前实现一次只处理一条正在执行的请求；上一条请求未结束时，新请求会收到忙碌提示
 
@@ -139,8 +176,8 @@ running in foreground; bridge stays attached to this terminal until interrupted
 
 按输出逐项排查：
 
-- `config: missing`：先创建 `~/.weCodex/config.json`
-- `credentials: missing`：先执行 `weCodex login`
+- `config: missing`：首次运行会自动创建 `~/.weCodex/config.json`，请先重新执行 `wecodex status` 或 `wecodex login`
+- `credentials: missing`：先执行 `wecodex login`
 - `codex command: unresolvable`：确认 `codex_command` 可执行且在 PATH 中，或改成绝对路径
 
 ### `start` 后为什么终端一直不返回？
@@ -150,7 +187,8 @@ running in foreground; bridge stays attached to this terminal until interrupted
 ## 项目结构
 
 - `cmd/`：CLI 命令实现（`status` / `login` / `start`）
-- `bridge/`：微信消息到 Codex ACP 的桥接逻辑
+- `bridge/`：微信消息到 Codex 后端的桥接逻辑
+- `backend/`：后端抽象、ACP 适配器和 `codex exec` CLI 后端
 - `codexacp/`：Codex ACP 客户端与权限判定
 - `ilink/`：iLink 登录、凭证、消息收发与监控
 - `config/`：配置加载、校验与默认路径逻辑

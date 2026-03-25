@@ -147,6 +147,41 @@ func TestPollQRStatusReturnsCredentialsOnConfirmedState(t *testing.T) {
 	}
 }
 
+func TestPollQRStatusUsesGETWithQRCodeQuery(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if r.URL.Path != "/ilink/bot/get_qrcode_status" {
+			http.Error(w, "bad path", http.StatusBadRequest)
+			return
+		}
+		if r.URL.RawQuery != "qrcode=qr-123" {
+			http.Error(w, "bad query", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"confirmed","bot_token":"bot-token","ilink_bot_id":"bot-id","baseurl":"https://example.com","ilink_user_id":"user-id"}`))
+	}))
+	defer server.Close()
+
+	got, err := pollQRStatus(context.Background(), server.URL, "qr-123", nil, time.Millisecond)
+	if err != nil {
+		t.Fatalf("poll QR status: %v", err)
+	}
+
+	want := Credentials{
+		BotToken:    "bot-token",
+		ILinkBotID:  "bot-id",
+		BaseURL:     "https://example.com",
+		ILinkUserID: "user-id",
+	}
+	if got != want {
+		t.Fatalf("expected credentials %#v, got %#v", want, got)
+	}
+}
+
 func TestPollQRStatusReturnsErrorWhenExpired(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

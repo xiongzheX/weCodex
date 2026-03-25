@@ -9,8 +9,8 @@ import (
 
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:           "weCodex",
-		Short:         "WeChat bridge for Codex ACP",
+		Use:           "wecodex",
+		Short:         "WeChat bridge for Codex runtime",
 		SilenceErrors: true,
 	}
 	root.AddCommand(statusCmd)

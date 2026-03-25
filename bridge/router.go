@@ -37,7 +37,7 @@ func BuildRuntimeStatus(status RuntimeStatus) string {
 
 	lines := []string{
 		"bridge mode: " + status.BridgeMode,
-		"acp state: " + status.ACPState,
+		"backend state: " + status.BackendState,
 		"active session: " + activeSession,
 		"permission mode: " + status.PermissionMode,
 	}

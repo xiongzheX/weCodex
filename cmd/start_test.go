@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/xiongzhe/weCodex/backend"
 	"github.com/xiongzhe/weCodex/bridge"
 	"github.com/xiongzhe/weCodex/codexacp"
 	"github.com/xiongzhe/weCodex/config"
@@ -20,18 +22,26 @@ func withStubbedStartDeps(t *testing.T) {
 	t.Helper()
 
 	origLoadCfg := startLoadConfig
+	origLoadRuntimeCfg := startLoadRuntimeConfig
 	origLoadCreds := startLoadCredentials
 	origNewACP := startNewACPClient
+	origNewCLI := startNewCLIClient
 	origNewBridge := startNewBridgeService
 	origNewClientMonitor := startNewILinkClientAndMonitor
 	origOut := startOutputWriter
 	origLogf := startLogf
 	origHome := startUserHomeDir
 
+	startLoadRuntimeConfig = func(io.Writer) (config.Config, error) {
+		return startLoadConfig()
+	}
+
 	t.Cleanup(func() {
 		startLoadConfig = origLoadCfg
+		startLoadRuntimeConfig = origLoadRuntimeCfg
 		startLoadCredentials = origLoadCreds
 		startNewACPClient = origNewACP
+		startNewCLIClient = origNewCLI
 		startNewBridgeService = origNewBridge
 		startNewILinkClientAndMonitor = origNewClientMonitor
 		startOutputWriter = origOut
@@ -47,7 +57,7 @@ type stubStartACP struct {
 	stopCalls  int
 
 	mu    sync.Mutex
-	calls []codexacp.PromptRequest
+	calls []backend.PromptRequest
 }
 
 func (s *stubStartACP) Start(_ context.Context) error {
@@ -60,25 +70,25 @@ func (s *stubStartACP) Stop() error {
 	return s.stopErr
 }
 
-func (s *stubStartACP) Prompt(_ context.Context, req codexacp.PromptRequest) (codexacp.PromptResult, error) {
+func (s *stubStartACP) Prompt(_ context.Context, req backend.PromptRequest) (backend.PromptResult, error) {
 	s.mu.Lock()
 	s.calls = append(s.calls, req)
 	s.mu.Unlock()
 
 	if strings.TrimSpace(req.SessionID) == "" {
-		return codexacp.PromptResult{SessionID: "sess-1", ReplyText: "reply"}, nil
+		return backend.PromptResult{SessionID: "sess-1", ReplyText: "reply"}, nil
 	}
-	return codexacp.PromptResult{SessionID: req.SessionID, ReplyText: "reply-continued"}, nil
+	return backend.PromptResult{SessionID: req.SessionID, ReplyText: "reply-continued"}, nil
 }
 
-func (s *stubStartACP) Health() codexacp.HealthSnapshot {
-	return codexacp.HealthSnapshot{State: codexacp.HealthReady}
+func (s *stubStartACP) Health() backend.HealthSnapshot {
+	return backend.HealthSnapshot{State: backend.HealthReady}
 }
 
-func (s *stubStartACP) PromptCalls() []codexacp.PromptRequest {
+func (s *stubStartACP) PromptCalls() []backend.PromptRequest {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]codexacp.PromptRequest, len(s.calls))
+	out := make([]backend.PromptRequest, len(s.calls))
 	copy(out, s.calls)
 	return out
 }
@@ -143,7 +153,7 @@ func TestRunStartReturnsConfigLoadErrorImmediately(t *testing.T) {
 		t.Fatalf("monitor should not run on config failure")
 		return nil
 	}}
-	startNewACPClient = func(codexacp.Config) startACPClient { return acp }
+	startNewACPClient = func(codexacp.Config) startBackendClient { return acp }
 	startNewILinkClientAndMonitor = func(ilink.Credentials, string) (startSender, startMonitorRunner) {
 		return &stubStartSender{}, monitor
 	}
@@ -154,6 +164,163 @@ func TestRunStartReturnsConfigLoadErrorImmediately(t *testing.T) {
 	}
 	if acp.startCalls != 0 {
 		t.Fatalf("expected ACP not to start, got %d starts", acp.startCalls)
+	}
+}
+
+func TestRunStartBootstrapsMissingConfigAndUsesCLIBackend(t *testing.T) {
+	withStubbedStartDeps(t)
+
+	startLoadRuntimeConfig = func(io.Writer) (config.Config, error) {
+		return config.Config{BackendType: "cli", CodexCommand: "codex", WorkingDirectory: "/tmp", PermissionMode: "readonly"}, nil
+	}
+
+	loadedCredsCfgs := make([]config.Config, 0, 1)
+	startLoadCredentials = func(cfg config.Config) (ilink.Credentials, error) {
+		loadedCredsCfgs = append(loadedCredsCfgs, cfg)
+		return ilink.Credentials{}, nil
+	}
+	startUserHomeDir = func() (string, error) { return "/home/tester", nil }
+
+	acpConstructCalls := 0
+	cliConstructCalls := 0
+	startNewACPClient = func(codexacp.Config) startBackendClient {
+		acpConstructCalls++
+		return &stubStartACP{}
+	}
+	startNewCLIClient = func(config.Config) backend.Client {
+		cliConstructCalls++
+		return &stubStartACP{}
+	}
+	startNewBridgeService = func(backend.Client) startBridgeService { return &stubStartBridge{} }
+	startNewILinkClientAndMonitor = func(ilink.Credentials, string) (startSender, startMonitorRunner) {
+		return &stubStartSender{}, &stubStartMonitor{}
+	}
+
+	err := runStart(context.Background(), &cobra.Command{})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if cliConstructCalls != 1 {
+		t.Fatalf("expected CLI backend constructor once, got %d", cliConstructCalls)
+	}
+	if acpConstructCalls != 0 {
+		t.Fatalf("expected ACP backend constructor not called, got %d", acpConstructCalls)
+	}
+	if len(loadedCredsCfgs) != 1 {
+		t.Fatalf("expected credentials loaded once, got %d", len(loadedCredsCfgs))
+	}
+	if loadedCredsCfgs[0].BackendType != "cli" {
+		t.Fatalf("expected credentials load with cli backend config, got %q", loadedCredsCfgs[0].BackendType)
+	}
+}
+
+func TestRunStartPrintsBootstrapNoticeBeforeForegroundNotice(t *testing.T) {
+	withStubbedStartDeps(t)
+
+	var out bytes.Buffer
+	startOutputWriter = func(*cobra.Command) io.Writer { return &out }
+	startLoadRuntimeConfig = func(w io.Writer) (config.Config, error) {
+		if _, err := fmt.Fprintln(w, defaultConfigCreatedNotice); err != nil {
+			return config.Config{}, err
+		}
+		return config.Config{CodexCommand: "codex", CodexArgs: []string{"acp"}, WorkingDirectory: "/tmp", PermissionMode: "readonly"}, nil
+	}
+	startLoadCredentials = func(config.Config) (ilink.Credentials, error) {
+		return ilink.Credentials{}, nil
+	}
+	startUserHomeDir = func() (string, error) { return "/home/tester", nil }
+	startNewACPClient = func(codexacp.Config) startBackendClient { return &stubStartACP{} }
+	startNewBridgeService = func(backend.Client) startBridgeService { return &stubStartBridge{} }
+	startNewILinkClientAndMonitor = func(ilink.Credentials, string) (startSender, startMonitorRunner) {
+		return &stubStartSender{}, &stubStartMonitor{}
+	}
+
+	err := runStart(context.Background(), &cobra.Command{})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	if got, want := out.String(), defaultConfigCreatedNotice+"\n"+startForegroundNotice+"\n"; got != want {
+		t.Fatalf("unexpected output order:\nwant: %q\ngot:  %q", want, got)
+	}
+}
+
+func TestRunStartUsesSingleWriterForBootstrapAndForegroundNotices(t *testing.T) {
+	withStubbedStartDeps(t)
+
+	var first bytes.Buffer
+	var second bytes.Buffer
+	calls := 0
+	startOutputWriter = func(*cobra.Command) io.Writer {
+		calls++
+		if calls == 1 {
+			return &first
+		}
+		return &second
+	}
+	startLoadRuntimeConfig = func(w io.Writer) (config.Config, error) {
+		if _, err := fmt.Fprintln(w, defaultConfigCreatedNotice); err != nil {
+			return config.Config{}, err
+		}
+		return config.Config{CodexCommand: "codex", CodexArgs: []string{"acp"}, WorkingDirectory: "/tmp", PermissionMode: "readonly"}, nil
+	}
+	startLoadCredentials = func(config.Config) (ilink.Credentials, error) {
+		return ilink.Credentials{}, nil
+	}
+	startUserHomeDir = func() (string, error) { return "/home/tester", nil }
+	startNewACPClient = func(codexacp.Config) startBackendClient { return &stubStartACP{} }
+	startNewBridgeService = func(backend.Client) startBridgeService { return &stubStartBridge{} }
+	startNewILinkClientAndMonitor = func(ilink.Credentials, string) (startSender, startMonitorRunner) {
+		return &stubStartSender{}, &stubStartMonitor{}
+	}
+
+	err := runStart(context.Background(), &cobra.Command{})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+
+	if got, want := first.String(), defaultConfigCreatedNotice+"\n"+startForegroundNotice+"\n"; got != want {
+		t.Fatalf("expected both notices on the first writer:\nwant: %q\ngot:  %q", want, got)
+	}
+	if second.Len() != 0 {
+		t.Fatalf("expected second writer to stay unused, got %q", second.String())
+	}
+}
+
+func TestRunStartReturnsBootstrapErrorImmediately(t *testing.T) {
+	withStubbedStartDeps(t)
+
+	wantErr := errors.New("invalid existing config")
+	startLoadRuntimeConfig = func(io.Writer) (config.Config, error) {
+		return config.Config{}, wantErr
+	}
+
+	credsCalls := 0
+	startLoadCredentials = func(config.Config) (ilink.Credentials, error) {
+		credsCalls++
+		return ilink.Credentials{}, nil
+	}
+
+	acpConstructCalls := 0
+	cliConstructCalls := 0
+	startNewACPClient = func(codexacp.Config) startBackendClient {
+		acpConstructCalls++
+		return &stubStartACP{}
+	}
+	startNewCLIClient = func(config.Config) backend.Client {
+		cliConstructCalls++
+		return &stubStartACP{}
+	}
+
+	err := runStart(context.Background(), &cobra.Command{})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected bootstrap error %v, got %v", wantErr, err)
+	}
+	if credsCalls != 0 {
+		t.Fatalf("expected credentials not loaded, got %d calls", credsCalls)
+	}
+	if acpConstructCalls != 0 || cliConstructCalls != 0 {
+		t.Fatalf("expected no backend construction, got acp=%d cli=%d", acpConstructCalls, cliConstructCalls)
 	}
 }
 
@@ -173,7 +340,7 @@ func TestRunStartReturnsCredentialsLoadErrorImmediately(t *testing.T) {
 		t.Fatalf("monitor should not run on credentials failure")
 		return nil
 	}}
-	startNewACPClient = func(codexacp.Config) startACPClient { return acp }
+	startNewACPClient = func(codexacp.Config) startBackendClient { return acp }
 	startNewILinkClientAndMonitor = func(ilink.Credentials, string) (startSender, startMonitorRunner) {
 		return &stubStartSender{}, monitor
 	}
@@ -187,11 +354,89 @@ func TestRunStartReturnsCredentialsLoadErrorImmediately(t *testing.T) {
 	}
 }
 
+func TestRunStartSelectsACPBackendWhenConfigured(t *testing.T) {
+	withStubbedStartDeps(t)
+
+	startLoadConfig = func() (config.Config, error) {
+		return config.Config{BackendType: "acp", CodexCommand: "codex", CodexArgs: []string{"acp"}, WorkingDirectory: "/tmp", PermissionMode: "readonly"}, nil
+	}
+	startLoadCredentials = func(config.Config) (ilink.Credentials, error) {
+		return ilink.Credentials{}, nil
+	}
+	startUserHomeDir = func() (string, error) { return "/home/tester", nil }
+
+	acpClient := &stubStartACP{}
+	acpConstructCalls := 0
+	cliConstructCalls := 0
+	startNewACPClient = func(codexacp.Config) startBackendClient {
+		acpConstructCalls++
+		return acpClient
+	}
+	startNewCLIClient = func(config.Config) backend.Client {
+		cliConstructCalls++
+		return &stubStartACP{}
+	}
+	startNewBridgeService = func(backend.Client) startBridgeService { return &stubStartBridge{} }
+	startNewILinkClientAndMonitor = func(ilink.Credentials, string) (startSender, startMonitorRunner) {
+		return &stubStartSender{}, &stubStartMonitor{}
+	}
+
+	err := runStart(context.Background(), &cobra.Command{})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if acpConstructCalls != 1 {
+		t.Fatalf("expected ACP backend constructor once, got %d", acpConstructCalls)
+	}
+	if cliConstructCalls != 0 {
+		t.Fatalf("expected CLI backend constructor not called, got %d", cliConstructCalls)
+	}
+}
+
+func TestRunStartSelectsCLIBackendWhenConfigured(t *testing.T) {
+	withStubbedStartDeps(t)
+
+	startLoadConfig = func() (config.Config, error) {
+		return config.Config{BackendType: "cli", CodexCommand: "codex", WorkingDirectory: "/tmp", PermissionMode: "readonly"}, nil
+	}
+	startLoadCredentials = func(config.Config) (ilink.Credentials, error) {
+		return ilink.Credentials{}, nil
+	}
+	startUserHomeDir = func() (string, error) { return "/home/tester", nil }
+
+	cliClient := &stubStartACP{}
+	acpConstructCalls := 0
+	cliConstructCalls := 0
+	startNewACPClient = func(codexacp.Config) startBackendClient {
+		acpConstructCalls++
+		return &stubStartACP{}
+	}
+	startNewCLIClient = func(config.Config) backend.Client {
+		cliConstructCalls++
+		return cliClient
+	}
+	startNewBridgeService = func(backend.Client) startBridgeService { return &stubStartBridge{} }
+	startNewILinkClientAndMonitor = func(ilink.Credentials, string) (startSender, startMonitorRunner) {
+		return &stubStartSender{}, &stubStartMonitor{}
+	}
+
+	err := runStart(context.Background(), &cobra.Command{})
+	if err != nil {
+		t.Fatalf("expected success, got %v", err)
+	}
+	if cliConstructCalls != 1 {
+		t.Fatalf("expected CLI backend constructor once, got %d", cliConstructCalls)
+	}
+	if acpConstructCalls != 0 {
+		t.Fatalf("expected ACP backend constructor not called, got %d", acpConstructCalls)
+	}
+}
+
 func TestRunStartReturnsACPStartErrorAndDoesNotStartMonitorTraffic(t *testing.T) {
 	withStubbedStartDeps(t)
 
 	startLoadConfig = func() (config.Config, error) {
-		return config.Config{CodexCommand: "codex", CodexArgs: []string{"acp"}, WorkingDirectory: "/tmp", PermissionMode: "readonly"}, nil
+		return config.Config{BackendType: "acp", CodexCommand: "codex", CodexArgs: []string{"acp"}, WorkingDirectory: "/tmp", PermissionMode: "readonly"}, nil
 	}
 	startLoadCredentials = func(config.Config) (ilink.Credentials, error) {
 		return ilink.Credentials{}, nil
@@ -201,7 +446,8 @@ func TestRunStartReturnsACPStartErrorAndDoesNotStartMonitorTraffic(t *testing.T)
 	acp := &stubStartACP{startErr: wantErr}
 	monitorRuns := 0
 	clientMonitorConstructCalls := 0
-	startNewACPClient = func(codexacp.Config) startACPClient { return acp }
+	startNewACPClient = func(codexacp.Config) startBackendClient { return acp }
+	startNewCLIClient = func(config.Config) backend.Client { return &stubStartACP{} }
 	startNewILinkClientAndMonitor = func(ilink.Credentials, string) (startSender, startMonitorRunner) {
 		clientMonitorConstructCalls++
 		return &stubStartSender{}, &stubStartMonitor{run: func(context.Context, func(ilink.InboundMessage) error) error {
@@ -245,9 +491,9 @@ func TestRunStartPrintsForegroundNoticeAndProcessesMonitorMessages(t *testing.T)
 		return bridge.OutboundReply{ToUserID: msg.FromUserID, ContextToken: msg.ContextToken, Text: "reply-1"}, nil
 	}}
 
-	startNewACPClient = func(codexacp.Config) startACPClient { return acp }
+	startNewACPClient = func(codexacp.Config) startBackendClient { return acp }
 	startNewILinkClientAndMonitor = func(ilink.Credentials, string) (startSender, startMonitorRunner) { return sender, monitor }
-	startNewBridgeService = func(bridge.ACPClient) startBridgeService { return bridgeSvc }
+	startNewBridgeService = func(backend.Client) startBridgeService { return bridgeSvc }
 
 	var out bytes.Buffer
 	startOutputWriter = func(*cobra.Command) io.Writer { return &out }
@@ -296,8 +542,8 @@ func TestRunStartSendFailureLogsWarningWithoutRetryAndKeepsSessionState(t *testi
 		return nil
 	}}
 
-	startNewACPClient = func(codexacp.Config) startACPClient { return acp }
-	startNewBridgeService = func(bridge.ACPClient) startBridgeService { return bridgeSvc }
+	startNewACPClient = func(codexacp.Config) startBackendClient { return acp }
+	startNewBridgeService = func(backend.Client) startBridgeService { return bridgeSvc }
 	startNewILinkClientAndMonitor = func(ilink.Credentials, string) (startSender, startMonitorRunner) { return sender, monitor }
 
 	var logs bytes.Buffer
@@ -342,8 +588,8 @@ func TestRunStartReturnsNilOnContextCanceledEvenWhenACPStopFails(t *testing.T) {
 	startUserHomeDir = func() (string, error) { return "/home/tester", nil }
 
 	acp := &stubStartACP{stopErr: errors.New("stop failed")}
-	startNewACPClient = func(codexacp.Config) startACPClient { return acp }
-	startNewBridgeService = func(acp bridge.ACPClient) startBridgeService { return &stubStartBridge{} }
+	startNewACPClient = func(codexacp.Config) startBackendClient { return acp }
+	startNewBridgeService = func(acp backend.Client) startBridgeService { return &stubStartBridge{} }
 	startNewILinkClientAndMonitor = func(ilink.Credentials, string) (startSender, startMonitorRunner) {
 		return &stubStartSender{}, &stubStartMonitor{run: func(context.Context, func(ilink.InboundMessage) error) error {
 			return context.Canceled

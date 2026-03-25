@@ -16,7 +16,7 @@ type ParsedInput struct {
 
 type RuntimeStatus struct {
 	BridgeMode       string
-	ACPState         string
+	BackendState     string
 	HasActiveSession bool
 	PermissionMode   string
 	LastErrorSummary string

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
+	"github.com/xiongzhe/weCodex/backend"
 	"github.com/xiongzhe/weCodex/bridge"
 	"github.com/xiongzhe/weCodex/codexacp"
 	"github.com/xiongzhe/weCodex/config"
@@ -18,10 +19,8 @@ import (
 
 const startForegroundNotice = "running in foreground; bridge stays attached to this terminal until interrupted"
 
-type startACPClient interface {
-	bridge.ACPClient
-	Start(ctx context.Context) error
-	Stop() error
+type startBackendClient interface {
+	backend.Client
 }
 
 type startBridgeService interface {
@@ -37,13 +36,17 @@ type startMonitorRunner interface {
 }
 
 var (
-	startLoadConfig      = config.Load
-	startLoadCredentials = ilink.LoadCredentials
-	startNewACPClient = func(cfg codexacp.Config) startACPClient {
-		return codexacp.NewClient(cfg)
+	startLoadConfig        = config.Load
+	startLoadRuntimeConfig = loadRuntimeConfig
+	startLoadCredentials   = ilink.LoadCredentials
+	startNewACPClient      = func(cfg codexacp.Config) startBackendClient {
+		return backend.NewACPClient(cfg)
 	}
-	startNewBridgeService = func(acp bridge.ACPClient) startBridgeService {
-		return bridge.NewService(acp)
+	startNewCLIClient = func(cfg config.Config) backend.Client {
+		return backend.NewCLIClient(cfg)
+	}
+	startNewBridgeService = func(client backend.Client) startBridgeService {
+		return bridge.NewService(client)
 	}
 	startNewILinkClientAndMonitor = func(creds ilink.Credentials, cursorPath string) (startSender, startMonitorRunner) {
 		client := ilink.NewClient(creds)
@@ -66,8 +69,9 @@ var startCmd = &cobra.Command{
 
 func runStart(ctx context.Context, cmd *cobra.Command) (err error) {
 	ignoreStopErr := false
+	out := startOutputWriter(cmd)
 
-	cfg, err := startLoadConfig()
+	cfg, err := startLoadRuntimeConfig(out)
 	if err != nil {
 		return err
 	}
@@ -77,17 +81,22 @@ func runStart(ctx context.Context, cmd *cobra.Command) (err error) {
 		return err
 	}
 
-	acp := startNewACPClient(codexacp.Config{
-		Command:          cfg.CodexCommand,
-		Args:             cfg.CodexArgs,
-		WorkingDirectory: cfg.WorkingDirectory,
-		PermissionMode:   cfg.PermissionMode,
-	})
-	if err := acp.Start(ctx); err != nil {
+	var backendClient backend.Client
+	if cfg.BackendType == "cli" {
+		backendClient = startNewCLIClient(cfg)
+	} else {
+		backendClient = startNewACPClient(codexacp.Config{
+			Command:          cfg.CodexCommand,
+			Args:             cfg.CodexArgs,
+			WorkingDirectory: cfg.WorkingDirectory,
+			PermissionMode:   cfg.PermissionMode,
+		})
+	}
+	if err := backendClient.Start(ctx); err != nil {
 		return err
 	}
 	defer func() {
-		stopErr := acp.Stop()
+		stopErr := backendClient.Stop()
 		if err == nil && !ignoreStopErr {
 			err = stopErr
 		}
@@ -98,9 +107,9 @@ func runStart(ctx context.Context, cmd *cobra.Command) (err error) {
 		return err
 	}
 	sender, monitor := startNewILinkClientAndMonitor(creds, cursorPath)
-	bridgeSvc := startNewBridgeService(acp)
+	bridgeSvc := startNewBridgeService(backendClient)
 
-	fmt.Fprintln(startOutputWriter(cmd), startForegroundNotice)
+	fmt.Fprintln(out, startForegroundNotice)
 
 	err = monitor.Run(ctx, func(msg ilink.InboundMessage) error {
 		reply, handleErr := bridgeSvc.HandleMessage(ctx, msg)

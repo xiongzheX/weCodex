@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xiongzhe/weCodex/codexacp"
+	"github.com/xiongzhe/weCodex/backend"
 	"github.com/xiongzhe/weCodex/ilink"
 )
 
@@ -16,10 +16,6 @@ const (
 	busyReplyText        = "上一条请求还在处理中，请稍后再试。"
 )
 
-type ACPClient interface {
-	Prompt(ctx context.Context, req codexacp.PromptRequest) (codexacp.PromptResult, error)
-	Health() codexacp.HealthSnapshot
-}
 
 type OutboundReply struct {
 	ToUserID     string
@@ -28,7 +24,7 @@ type OutboundReply struct {
 }
 
 type Service struct {
-	acp ACPClient
+	acp backend.Client
 
 	mu              sync.Mutex
 	senderSession   map[string]string
@@ -36,9 +32,9 @@ type Service struct {
 	promptLockOwner string
 }
 
-func NewService(acp ACPClient) *Service {
+func NewService(acp backend.Client) *Service {
 	if acp == nil {
-		panic("bridge.NewService: nil ACPClient")
+		panic("bridge.NewService: nil backend.Client")
 	}
 	return &Service{acp: acp, senderSession: make(map[string]string)}
 }
@@ -60,7 +56,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg ilink.InboundMessage) (
 		h := s.acp.Health()
 		status := BuildRuntimeStatus(RuntimeStatus{
 			BridgeMode:       "running",
-			ACPState:         string(h.State),
+			BackendState:     string(h.State),
 			HasActiveSession: s.HasActiveSession(msg.FromUserID),
 			PermissionMode:   "read-only",
 			LastErrorSummary: h.LastErrorSummary,
@@ -86,7 +82,7 @@ func (s *Service) handlePrompt(ctx context.Context, msg ilink.InboundMessage, te
 	}
 	defer s.releasePromptLock(msg.FromUserID)
 
-	res, err := s.acp.Prompt(ctx, codexacp.PromptRequest{
+	res, err := s.acp.Prompt(ctx, backend.PromptRequest{
 		SenderID:  msg.FromUserID,
 		SessionID: sessionID,
 		Text:      text,
@@ -106,25 +102,25 @@ func (s *Service) handlePrompt(ctx context.Context, msg ilink.InboundMessage, te
 }
 
 func (s *Service) handlePromptError(senderID string, err error) string {
-	var timeoutErr *codexacp.PromptTimeoutError
+	var timeoutErr *backend.PromptTimeoutError
 	if errors.As(err, &timeoutErr) {
 		s.clearSession(senderID)
 		return "请求超时，会话已重置，请稍后重试。"
 	}
 
-	var sessionErr *codexacp.SessionError
+	var sessionErr *backend.SessionError
 	if errors.As(err, &sessionErr) {
 		s.clearSession(senderID)
 		return "会话异常，已重置，请重试。"
 	}
 
-	var permissionErr *codexacp.PermissionError
+	var permissionErr *backend.PermissionError
 	if errors.As(err, &permissionErr) {
 		s.clearSession(senderID)
 		return strings.TrimSpace(permissionErr.Error())
 	}
 
-	var promptErr *codexacp.PromptError
+	var promptErr *backend.PromptError
 	if errors.As(err, &promptErr) {
 		s.clearSession(senderID)
 		return "请求失败，会话已重置，请重试。"

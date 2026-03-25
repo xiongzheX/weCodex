@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,7 +45,7 @@ func pollQRStatus(ctx context.Context, baseURL string, qrCode string, onStatus f
 
 	for {
 		var resp QRStatusResponse
-		err := client.doPost(ctx, "/ilink/bot/get_qrcode_status", QRStatusRequest{QRCode: qrCode}, &resp)
+		err := client.doGet(ctx, "/ilink/bot/get_qrcode_status", url.Values{"qrcode": []string{qrCode}}, &resp)
 		if err != nil {
 			if ctx.Err() != nil {
 				return Credentials{}, ctx.Err()

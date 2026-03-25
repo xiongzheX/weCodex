@@ -58,7 +58,7 @@ func TestBuildHelpTextIncludesLocalCommands(t *testing.T) {
 func TestBuildRuntimeStatusWithoutLastErrorSummary(t *testing.T) {
 	status := RuntimeStatus{
 		BridgeMode:       "running",
-		ACPState:         "ready",
+		BackendState:         "ready",
 		HasActiveSession: true,
 		PermissionMode:   "read-only",
 	}
@@ -66,7 +66,7 @@ func TestBuildRuntimeStatusWithoutLastErrorSummary(t *testing.T) {
 	got := BuildRuntimeStatus(status)
 
 	assertContains(t, got, "bridge mode: running")
-	assertContains(t, got, "acp state: ready")
+	assertContains(t, got, "backend state: ready")
 	assertContains(t, got, "active session: yes")
 	assertContains(t, got, "permission mode: read-only")
 	assertNotContains(t, got, "last error summary:")
@@ -75,7 +75,7 @@ func TestBuildRuntimeStatusWithoutLastErrorSummary(t *testing.T) {
 func TestBuildRuntimeStatusWithLastErrorSummary(t *testing.T) {
 	status := RuntimeStatus{
 		BridgeMode:       "running",
-		ACPState:         "degraded",
+		BackendState:         "degraded",
 		HasActiveSession: false,
 		PermissionMode:   "read-only",
 		LastErrorSummary: "rpc timeout",
@@ -84,7 +84,7 @@ func TestBuildRuntimeStatusWithLastErrorSummary(t *testing.T) {
 	got := BuildRuntimeStatus(status)
 
 	assertContains(t, got, "bridge mode: running")
-	assertContains(t, got, "acp state: degraded")
+	assertContains(t, got, "backend state: degraded")
 	assertContains(t, got, "active session: no")
 	assertContains(t, got, "permission mode: read-only")
 	assertContains(t, got, "last error summary: rpc timeout")

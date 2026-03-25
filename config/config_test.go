@@ -51,6 +51,84 @@ func TestValidateRequiresCodexArgs(t *testing.T) {
 	}
 }
 
+func TestValidateAllowsCLIBackendWithoutCodexArgs(t *testing.T) {
+	cfg := Config{
+		BackendType:      "cli",
+		CodexCommand:     "/usr/local/bin/codex",
+		WorkingDirectory: "/tmp/project",
+		PermissionMode:   "readonly",
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected cli backend without codex_args to be valid, got %v", err)
+	}
+}
+
+func TestEffectiveWorkingDirectoryModeDefaultsToManual(t *testing.T) {
+	cfg := Config{}
+	if got := cfg.EffectiveWorkingDirectoryMode(); got != WorkingDirectoryModeManual {
+		t.Fatalf("expected default effective working directory mode %q, got %q", WorkingDirectoryModeManual, got)
+	}
+}
+
+func TestValidateAllowsAutoWorkingDirectoryMode(t *testing.T) {
+	cfg := Config{
+		CodexCommand:          "/usr/local/bin/codex",
+		CodexArgs:             []string{"acp"},
+		WorkingDirectory:      "/tmp/project",
+		WorkingDirectoryMode:  WorkingDirectoryModeAuto,
+		PermissionMode:        "readonly",
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected auto working_directory_mode to be valid, got %v", err)
+	}
+}
+
+func TestValidateRejectsUnknownWorkingDirectoryMode(t *testing.T) {
+	cfg := Config{
+		CodexCommand:          "/usr/local/bin/codex",
+		CodexArgs:             []string{"acp"},
+		WorkingDirectory:      "/tmp/project",
+		WorkingDirectoryMode:  "unknown",
+		PermissionMode:        "readonly",
+	}
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "working_directory_mode") {
+		t.Fatalf("expected working_directory_mode validation error, got %v", err)
+	}
+}
+
+func TestValidateRequiresACPArgsForACPBackend(t *testing.T) {
+	cfg := Config{
+		BackendType:      "acp",
+		CodexCommand:     "/usr/local/bin/codex",
+		WorkingDirectory: "/tmp/project",
+		PermissionMode:   "readonly",
+	}
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "codex_args") {
+		t.Fatalf("expected codex_args validation error for acp backend, got %v", err)
+	}
+}
+
+func TestValidateRejectsUnknownBackendType(t *testing.T) {
+	cfg := Config{
+		BackendType:      "unknown",
+		CodexCommand:     "/usr/local/bin/codex",
+		CodexArgs:        []string{"acp"},
+		WorkingDirectory: "/tmp/project",
+		PermissionMode:   "readonly",
+	}
+
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "backend_type") {
+		t.Fatalf("expected backend_type validation error, got %v", err)
+	}
+}
+
 func TestValidateRejectsUnknownPermissionMode(t *testing.T) {
 	cfg := Config{
 		CodexCommand:     "/usr/local/bin/codex",
@@ -100,15 +178,79 @@ func TestSaveWrites0600Permissions(t *testing.T) {
 	}
 }
 
+func TestSavePreservesEmptyCodexArgsArray(t *testing.T) {
+	setTestHome(t, t.TempDir())
+
+	cfg := Config{
+		BackendType:      "cli",
+		CodexCommand:     "/usr/local/bin/codex",
+		CodexArgs:        []string{},
+		WorkingDirectory: "/tmp/project",
+		PermissionMode:   "readonly",
+	}
+
+	if err := Save(cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	configPath, err := DefaultConfigPath()
+	if err != nil {
+		t.Fatalf("default config path: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+
+	if !strings.Contains(string(data), `"codex_args": []`) {
+		t.Fatalf("expected saved config JSON to include empty codex_args array, got %s", string(data))
+	}
+}
+
+func TestSaveNormalizesNilCodexArgsArrayForCLIBackend(t *testing.T) {
+	setTestHome(t, t.TempDir())
+
+	cfg := Config{
+		BackendType:      "cli",
+		CodexCommand:     "/usr/local/bin/codex",
+		WorkingDirectory: "/tmp/project",
+		PermissionMode:   "readonly",
+	}
+
+	if err := Save(cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	configPath, err := DefaultConfigPath()
+	if err != nil {
+		t.Fatalf("default config path: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, `"codex_args": []`) {
+		t.Fatalf("expected saved config JSON to normalize nil codex_args to empty array, got %s", content)
+	}
+	if strings.Contains(content, `"codex_args": null`) {
+		t.Fatalf("expected saved config JSON not to contain null codex_args, got %s", content)
+	}
+}
+
 func TestLoadRoundTrip(t *testing.T) {
 	setTestHome(t, t.TempDir())
 
 	want := Config{
-		CodexCommand:      "/usr/local/bin/codex",
-		CodexArgs:         []string{"acp"},
-		WorkingDirectory:  "/tmp/project",
-		PermissionMode:    "readonly",
-		WechatAccountsDir: "/tmp/accounts",
+		CodexCommand:          "/usr/local/bin/codex",
+		CodexArgs:             []string{"acp"},
+		WorkingDirectory:      "/tmp/project",
+		WorkingDirectoryMode:  WorkingDirectoryModeAuto,
+		PermissionMode:        "readonly",
+		WechatAccountsDir:     "/tmp/accounts",
 	}
 
 	if err := Save(want); err != nil {
@@ -121,6 +263,29 @@ func TestLoadRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(want, got) {
 		t.Fatalf("expected %#v, got %#v", want, got)
+	}
+}
+
+func TestLoadPreservesBackendType(t *testing.T) {
+	setTestHome(t, t.TempDir())
+
+	want := Config{
+		BackendType:      "cli",
+		CodexCommand:     "/usr/local/bin/codex",
+		WorkingDirectory: "/tmp/project",
+		PermissionMode:   "readonly",
+	}
+
+	if err := Save(want); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	got, err := Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if got.BackendType != want.BackendType {
+		t.Fatalf("expected backend_type %q, got %q", want.BackendType, got.BackendType)
 	}
 }
 

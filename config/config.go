@@ -10,34 +10,67 @@ import (
 )
 
 const (
-	configDirName      = ".weCodex"
-	configFileName     = "config.json"
+	configDirName       = ".weCodex"
+	configFileName      = "config.json"
 	credentialsFileName = "account.json"
+
+	WorkingDirectoryModeAuto   = "auto"
+	WorkingDirectoryModeManual = "manual"
 )
 
 type Config struct {
-	CodexCommand      string   `json:"codex_command"`
-	CodexArgs         []string `json:"codex_args,omitempty"`
-	WorkingDirectory  string   `json:"working_directory"`
-	PermissionMode    string   `json:"permission_mode"`
-	LogLevel          string   `json:"log_level,omitempty"`
-	WechatAccountsDir string   `json:"wechat_accounts_dir,omitempty"`
+	BackendType           string   `json:"backend_type,omitempty"`
+	CodexCommand          string   `json:"codex_command"`
+	CodexArgs             []string `json:"codex_args"`
+	WorkingDirectory      string   `json:"working_directory"`
+	WorkingDirectoryMode  string   `json:"working_directory_mode,omitempty"`
+	PermissionMode        string   `json:"permission_mode"`
+	LogLevel              string   `json:"log_level,omitempty"`
+	WechatAccountsDir     string   `json:"wechat_accounts_dir,omitempty"`
 }
 
 func (c Config) Validate() error {
+	backendType := c.BackendType
+	if backendType == "" {
+		backendType = "acp"
+	}
+	if backendType != "acp" && backendType != "cli" {
+		return fmt.Errorf("backend_type must be one of: acp, cli")
+	}
 	if c.CodexCommand == "" {
 		return fmt.Errorf("codex_command is required")
 	}
-	if len(c.CodexArgs) == 0 {
+	if backendType == "acp" && len(c.CodexArgs) == 0 {
 		return fmt.Errorf("codex_args is required")
 	}
 	if c.WorkingDirectory == "" {
 		return fmt.Errorf("working_directory is required")
 	}
+	if c.WorkingDirectoryMode != "" && c.WorkingDirectoryMode != WorkingDirectoryModeAuto && c.WorkingDirectoryMode != WorkingDirectoryModeManual {
+		return fmt.Errorf("working_directory_mode must be one of: auto, manual")
+	}
 	if c.PermissionMode != "readonly" {
 		return fmt.Errorf("permission_mode must be readonly")
 	}
 	return nil
+}
+
+func (c Config) EffectiveWorkingDirectoryMode() string {
+	if c.WorkingDirectoryMode == "" {
+		return WorkingDirectoryModeManual
+	}
+	return c.WorkingDirectoryMode
+}
+
+func (c Config) normalizedForSave() Config {
+	backendType := c.BackendType
+	if backendType == "" {
+		backendType = "acp"
+	}
+	if backendType == "cli" && c.CodexArgs == nil {
+		c.CodexArgs = []string{}
+	}
+	return c
 }
 
 func DefaultConfigPath() (string, error) {
@@ -101,7 +134,7 @@ func Save(cfg Config) error {
 		return fmt.Errorf("create config directory: %w", err)
 	}
 
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	data, err := json.MarshalIndent(cfg.normalizedForSave(), "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode config file: %w", err)
 	}

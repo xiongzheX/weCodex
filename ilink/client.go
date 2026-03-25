@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -86,6 +87,25 @@ func (c *Client) doPost(ctx context.Context, path string, body any, result any) 
 	}
 	c.setHeaders(req)
 
+	return c.do(req, result)
+}
+
+func (c *Client) doGet(ctx context.Context, path string, query url.Values, result any) error {
+	fullURL := c.baseURL + path
+	if encoded := query.Encode(); encoded != "" {
+		fullURL += "?" + encoded
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	c.setHeaders(req)
+
+	return c.do(req, result)
+}
+
+func (c *Client) do(req *http.Request, result any) error {
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("send request: %w", err)
