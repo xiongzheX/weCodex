@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/xiongzhe/weCodex/config"
+	"github.com/xiongzheX/weCodex/config"
 )
 
 type commandExistsFunc func(command string) (bool, error)

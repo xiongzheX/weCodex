@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xiongzhe/weCodex/codexacp"
+	"github.com/xiongzheX/weCodex/codexacp"
 )
 
 type stubACPInner struct {

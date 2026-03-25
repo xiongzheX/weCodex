@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xiongzhe/weCodex/config"
+	"github.com/xiongzheX/weCodex/config"
 )
 
 func TestLoadRuntimeConfigPrintsCreateNoticeWhenConfigIsBootstrapped(t *testing.T) {

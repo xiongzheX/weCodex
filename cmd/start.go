@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 
 	"github.com/spf13/cobra"
-	"github.com/xiongzhe/weCodex/backend"
-	"github.com/xiongzhe/weCodex/bridge"
-	"github.com/xiongzhe/weCodex/codexacp"
-	"github.com/xiongzhe/weCodex/config"
-	"github.com/xiongzhe/weCodex/ilink"
+	"github.com/xiongzheX/weCodex/backend"
+	"github.com/xiongzheX/weCodex/bridge"
+	"github.com/xiongzheX/weCodex/codexacp"
+	"github.com/xiongzheX/weCodex/config"
+	"github.com/xiongzheX/weCodex/ilink"
 )
 
 const startForegroundNotice = "running in foreground; bridge stays attached to this terminal until interrupted"

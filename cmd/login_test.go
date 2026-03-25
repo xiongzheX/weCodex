@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xiongzhe/weCodex/config"
-	"github.com/xiongzhe/weCodex/ilink"
+	"github.com/xiongzheX/weCodex/config"
+	"github.com/xiongzheX/weCodex/ilink"
 )
 
 func withStubbedLoginDeps(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/xiongzhe/weCodex/config"
+	"github.com/xiongzheX/weCodex/config"
 )
 
 const defaultConfigCreatedNotice = "default config created: ~/.weCodex/config.json (backend: cli)"

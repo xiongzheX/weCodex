@@ -1,6 +1,6 @@
 package main
 
-import "github.com/xiongzhe/weCodex/cmd"
+import "github.com/xiongzheX/weCodex/cmd"
 
 func main() {
 	cmd.Execute()

@@ -11,11 +11,11 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
-	"github.com/xiongzhe/weCodex/backend"
-	"github.com/xiongzhe/weCodex/bridge"
-	"github.com/xiongzhe/weCodex/codexacp"
-	"github.com/xiongzhe/weCodex/config"
-	"github.com/xiongzhe/weCodex/ilink"
+	"github.com/xiongzheX/weCodex/backend"
+	"github.com/xiongzheX/weCodex/bridge"
+	"github.com/xiongzheX/weCodex/codexacp"
+	"github.com/xiongzheX/weCodex/config"
+	"github.com/xiongzheX/weCodex/ilink"
 )
 
 func withStubbedStartDeps(t *testing.T) {

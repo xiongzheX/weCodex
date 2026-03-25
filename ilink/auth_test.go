@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xiongzhe/weCodex/config"
+	"github.com/xiongzheX/weCodex/config"
 )
 
 func TestFetchQRCodeCallsExpectedEndpoint(t *testing.T) {

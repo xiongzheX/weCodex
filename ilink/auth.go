@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xiongzhe/weCodex/config"
+	"github.com/xiongzheX/weCodex/config"
 )
 
 var (

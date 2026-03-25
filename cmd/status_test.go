@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xiongzhe/weCodex/config"
+	"github.com/xiongzheX/weCodex/config"
 )
 
 func assertContains(t *testing.T, got string, want string) {

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xiongzhe/weCodex/config"
+	"github.com/xiongzheX/weCodex/config"
 )
 
 func TestCLIClientPromptRunsCodexExec(t *testing.T) {

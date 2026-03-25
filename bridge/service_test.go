@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xiongzhe/weCodex/backend"
-	"github.com/xiongzhe/weCodex/ilink"
+	"github.com/xiongzheX/weCodex/backend"
+	"github.com/xiongzheX/weCodex/ilink"
 )
 
 func TestNewServicePanicsOnNilACP(t *testing.T) {
