@@ -510,7 +510,7 @@ func TestRunStartPrintsForegroundNoticeAndProcessesMonitorMessages(t *testing.T)
 	if len(reqs) != 1 {
 		t.Fatalf("expected one outbound send, got %d", len(reqs))
 	}
-	if reqs[0].ToUserID != "u-1" || reqs[0].ContextToken != "ctx-1" || reqs[0].Text != "reply-1" {
+	if reqs[0].Msg.ToUserID != "u-1" || reqs[0].Msg.ContextToken != "ctx-1" || reqs[0].Msg.ItemList[0].TextItem == nil || reqs[0].Msg.ItemList[0].TextItem.Text != "reply-1" {
 		t.Fatalf("unexpected send request: %+v", reqs[0])
 	}
 	if acp.stopCalls != 1 {

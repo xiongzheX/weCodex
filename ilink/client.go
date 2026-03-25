@@ -56,21 +56,37 @@ func (c *Client) GetUpdates(ctx context.Context, cursor string) (GetUpdatesRespo
 }
 
 func (c *Client) SendMessage(ctx context.Context, req SendMessageRequest) (SendMessageResponse, error) {
-	payload := sendMessagePayload{
-		Msg: sendMessageBody{
-			ToUserID:     req.ToUserID,
-			ContextToken: req.ContextToken,
-			MessageType:  MessageTypeBot,
-			ItemList: []Item{{
-				Type:     ItemTypeText,
-				TextItem: &TextItem{Text: req.Text},
-			}},
-		},
+	if req.Msg.FromUserID == "" {
+		req.Msg.FromUserID = c.botID
+	}
+	if req.Msg.ClientID == "" {
+		req.Msg.ClientID = generateWechatUIN()
+	}
+	if req.Msg.MessageType == 0 {
+		req.Msg.MessageType = MessageTypeBot
+	}
+	if req.Msg.MessageState == 0 {
+		req.Msg.MessageState = MessageStateFinish
+	}
+	if req.Msg.ToUserID == "" {
+		req.Msg.ToUserID = req.ToUserID
+	}
+	if req.Msg.ContextToken == "" {
+		req.Msg.ContextToken = req.ContextToken
+	}
+	if len(req.Msg.ItemList) == 0 && req.Text != "" {
+		req.Msg.ItemList = []MessageItem{{
+			Type: ItemTypeText,
+			TextItem: &TextItem{Text: req.Text},
+		}}
 	}
 
 	var resp SendMessageResponse
-	if err := c.doPost(ctx, "/ilink/bot/sendmessage", payload, &resp); err != nil {
+	if err := c.doPost(ctx, "/ilink/bot/sendmessage", req, &resp); err != nil {
 		return SendMessageResponse{}, err
+	}
+	if resp.Ret != 0 {
+		return SendMessageResponse{}, fmt.Errorf("ilink sendmessage failed: errcode=%d errmsg=%s", resp.Ret, strings.TrimSpace(resp.ErrMsg))
 	}
 	return resp, nil
 }

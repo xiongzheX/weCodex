@@ -71,6 +71,78 @@ func TestNewClientFallsBackToDefaultBaseURL(t *testing.T) {
 	}
 }
 
+func TestSendMessageUsesWeclawStyleEnvelope(t *testing.T) {
+	var gotBaseInfo BaseInfo
+	var gotFromUserID string
+	var gotClientID string
+	var gotMessageType int
+	var gotMessageState int
+	var gotContextToken string
+	var gotText string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var req struct {
+			BaseInfo BaseInfo `json:"base_info"`
+			Msg struct {
+				FromUserID   string    `json:"from_user_id"`
+				ToUserID     string    `json:"to_user_id"`
+				ClientID     string    `json:"client_id"`
+				MessageType  int       `json:"message_type"`
+				MessageState int       `json:"message_state"`
+				ContextToken string    `json:"context_token"`
+				ItemList     []Item    `json:"item_list"`
+			} `json:"msg"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		gotBaseInfo = req.BaseInfo
+		gotFromUserID = req.Msg.FromUserID
+		gotClientID = req.Msg.ClientID
+		gotMessageType = req.Msg.MessageType
+		gotMessageState = req.Msg.MessageState
+		gotContextToken = req.Msg.ContextToken
+		if len(req.Msg.ItemList) > 0 && req.Msg.ItemList[0].TextItem != nil {
+			gotText = req.Msg.ItemList[0].TextItem.Text
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ret":0}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(Credentials{BotToken: "bot-token", ILinkBotID: "bot-id", BaseURL: server.URL})
+	_, err := client.SendMessage(context.Background(), SendMessageRequest{
+		ToUserID:     "wx-user",
+		ContextToken: "ctx-1",
+		Text:         "hello",
+	})
+	if err != nil {
+		t.Fatalf("send message: %v", err)
+	}
+
+	if gotFromUserID != "bot-id" {
+		t.Fatalf("expected from_user_id to use bot id, got %q", gotFromUserID)
+	}
+	if gotClientID == "" {
+		t.Fatalf("expected client_id to be set")
+	}
+	if gotMessageType != MessageTypeBot {
+		t.Fatalf("expected message_type bot, got %d", gotMessageType)
+	}
+	if gotMessageState != MessageStateFinish {
+		t.Fatalf("expected message_state finish, got %d", gotMessageState)
+	}
+	if gotContextToken != "ctx-1" {
+		t.Fatalf("expected context token reuse, got %q", gotContextToken)
+	}
+	if gotText != "hello" {
+		t.Fatalf("expected text payload, got %q", gotText)
+	}
+	_ = gotBaseInfo
+}
+
 func TestSendMessageUsesContextTokenAndTextOnlyPayload(t *testing.T) {
 	var gotPath string
 	var gotContextToken string
@@ -124,6 +196,30 @@ func TestSendMessageUsesContextTokenAndTextOnlyPayload(t *testing.T) {
 	}
 	if gotFirstItemType != ItemTypeText || gotFirstItemText != "hello" {
 		t.Fatalf("expected plain-text payload, got type=%d text=%q", gotFirstItemType, gotFirstItemText)
+	}
+}
+
+func TestSendMessageReturnsBusinessErrorWhenRetNonZero(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ret":1,"errmsg":"invalid context token"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(Credentials{BotToken: "bot-token", BaseURL: server.URL})
+	_, err := client.SendMessage(context.Background(), SendMessageRequest{
+		ToUserID:     "wx-user",
+		ContextToken: "ctx-bad",
+		Text:         "hello",
+	})
+	if err == nil {
+		t.Fatalf("expected send message business error when ret != 0")
+	}
+	if !strings.Contains(err.Error(), "sendmessage failed") {
+		t.Fatalf("expected sendmessage failed error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "invalid context token") {
+		t.Fatalf("expected errmsg to be included, got %v", err)
 	}
 }
 

@@ -72,10 +72,30 @@ type TextItem struct {
 	Text string `json:"text"`
 }
 
+type BaseInfo struct {
+	ChannelVersion string `json:"channel_version,omitempty"`
+}
+
+// MessageItem is a single item in a message.
+type MessageItem = Item
+
 type SendMessageRequest struct {
-	ToUserID     string `json:"-"`
-	ContextToken string `json:"-"`
-	Text         string `json:"-"`
+	Msg          SendMsg  `json:"msg"`
+	BaseInfo     BaseInfo `json:"base_info"`
+	ToUserID     string   `json:"-"`
+	ContextToken string   `json:"-"`
+	Text         string   `json:"-"`
+}
+
+// SendMsg is the message payload for sending.
+type SendMsg struct {
+	FromUserID   string        `json:"from_user_id"`
+	ToUserID     string        `json:"to_user_id"`
+	ClientID     string        `json:"client_id"`
+	MessageType  int           `json:"message_type"`
+	MessageState int           `json:"message_state"`
+	ItemList     []MessageItem `json:"item_list"`
+	ContextToken string        `json:"context_token"`
 }
 
 type sendMessagePayload struct {

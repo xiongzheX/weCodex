@@ -112,19 +112,31 @@ func runStart(ctx context.Context, cmd *cobra.Command) (err error) {
 	fmt.Fprintln(out, startForegroundNotice)
 
 	err = monitor.Run(ctx, func(msg ilink.InboundMessage) error {
+		startLogf("info: inbound message received from=%s type=%d state=%d text_len=%d context_token_len=%d", msg.FromUserID, msg.MessageType, msg.MessageState, len(msg.Text), len(msg.ContextToken))
 		reply, handleErr := bridgeSvc.HandleMessage(ctx, msg)
 		if handleErr != nil {
 			return handleErr
 		}
-		_, sendErr := sender.SendMessage(ctx, ilink.SendMessageRequest{
-			ToUserID:     reply.ToUserID,
-			ContextToken: reply.ContextToken,
-			Text:         reply.Text,
+		resp, sendErr := sender.SendMessage(ctx, ilink.SendMessageRequest{
+			Msg: ilink.SendMsg{
+				FromUserID:   creds.ILinkBotID,
+				ToUserID:     reply.ToUserID,
+				ClientID:     reply.ContextToken,
+				MessageType:  ilink.MessageTypeBot,
+				MessageState: ilink.MessageStateFinish,
+				ItemList: []ilink.MessageItem{{
+					Type: ilink.ItemTypeText,
+					TextItem: &ilink.TextItem{Text: reply.Text},
+				}},
+				ContextToken: reply.ContextToken,
+			},
+			BaseInfo: ilink.BaseInfo{},
 		})
 		if sendErr != nil {
 			startLogf("warning: ilink sendmessage failed: %v", sendErr)
 			return nil
 		}
+		startLogf("info: outbound message sent to=%s text_len=%d context_token_len=%d ilink_ret=%d ilink_errmsg=%q", reply.ToUserID, len(reply.Text), len(reply.ContextToken), resp.Ret, resp.ErrMsg)
 		return nil
 	})
 	if errors.Is(err, context.Canceled) {
