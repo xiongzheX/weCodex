@@ -7,11 +7,14 @@ const (
 	InputHelp   InputKind = "help"
 	InputStatus InputKind = "status"
 	InputNew    InputKind = "new"
+	InputList   InputKind = "list"
+	InputUse    InputKind = "use"
 )
 
 type ParsedInput struct {
-	Kind InputKind
-	Text string
+	Kind     InputKind
+	Text     string
+	UseIndex *int
 }
 
 type RuntimeStatus struct {
@@ -21,3 +24,4 @@ type RuntimeStatus struct {
 	PermissionMode   string
 	LastErrorSummary string
 }
+

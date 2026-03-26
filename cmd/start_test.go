@@ -70,6 +70,14 @@ func (s *stubStartACP) Stop() error {
 	return s.stopErr
 }
 
+func (s *stubStartACP) ListSessions(context.Context) (backend.SessionListResult, error) {
+	return backend.SessionListResult{}, nil
+}
+
+func (s *stubStartACP) CreateSession(context.Context, backend.SessionCreateRequest) (backend.SessionInfo, error) {
+	return backend.SessionInfo{}, nil
+}
+
 func (s *stubStartACP) Prompt(_ context.Context, req backend.PromptRequest) (backend.PromptResult, error) {
 	s.mu.Lock()
 	s.calls = append(s.calls, req)
@@ -116,8 +124,8 @@ func (s *stubStartMonitor) Run(ctx context.Context, handle func(ilink.InboundMes
 }
 
 type stubStartSender struct {
-	mu       sync.Mutex
-	reqs     []ilink.SendMessageRequest
+	mu        sync.Mutex
+	reqs      []ilink.SendMessageRequest
 	responses []error
 }
 

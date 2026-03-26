@@ -153,6 +153,65 @@ func TestHandleMessageHelpStatusAndNew(t *testing.T) {
 	}
 }
 
+func TestHandleMessageThreadCommandsUseBackendSessionState(t *testing.T) {
+	acp := &stubACPClient{}
+	acp.listFn = func(context.Context) (backend.SessionListResult, error) {
+		return backend.SessionListResult{
+			ActiveSessionID: "s2",
+			Sessions: []backend.SessionInfo{
+				{SessionID: "s1", DisplayName: "alpha"},
+				{SessionID: "s2", DisplayName: "beta"},
+			},
+		}, nil
+	}
+	acp.createFn = func(context.Context, backend.SessionCreateRequest) (backend.SessionInfo, error) {
+		return backend.SessionInfo{SessionID: "s3", DisplayName: "gamma"}, nil
+	}
+	acp.promptFn = func(_ context.Context, req backend.PromptRequest) (backend.PromptResult, error) {
+		if req.SessionID != "s2" && req.SessionID != "s3" {
+			t.Fatalf("unexpected session id %q", req.SessionID)
+		}
+		return backend.PromptResult{SessionID: req.SessionID, ReplyText: "ok"}, nil
+	}
+
+	svc := NewService(acp)
+
+	listOut, err := svc.HandleMessage(context.Background(), ilink.InboundMessage{FromUserID: "u", Text: "/list"})
+	if err != nil {
+		t.Fatalf("/list: %v", err)
+	}
+	if !strings.Contains(listOut.Text, "1.") || !strings.Contains(listOut.Text, "2.") || !strings.Contains(listOut.Text, "[当前]") {
+		t.Fatalf("list output missing numbering or current marker: %q", listOut.Text)
+	}
+
+	useOut, err := svc.HandleMessage(context.Background(), ilink.InboundMessage{FromUserID: "u", Text: "/use 2"})
+	if err != nil {
+		t.Fatalf("/use: %v", err)
+	}
+	if !strings.Contains(useOut.Text, "已切换到线程 2") {
+		t.Fatalf("unexpected /use confirmation: %q", useOut.Text)
+	}
+
+	promptOut, err := svc.HandleMessage(context.Background(), ilink.InboundMessage{FromUserID: "u", Text: "hello"})
+	if err != nil {
+		t.Fatalf("prompt after /use: %v", err)
+	}
+	if promptOut.Text != "ok" {
+		t.Fatalf("unexpected prompt reply after /use: %q", promptOut.Text)
+	}
+
+	newOut, err := svc.HandleMessage(context.Background(), ilink.InboundMessage{FromUserID: "u", Text: "/new"})
+	if err != nil {
+		t.Fatalf("/new: %v", err)
+	}
+	if !strings.Contains(newOut.Text, "已切换到新线程") {
+		t.Fatalf("unexpected /new confirmation: %q", newOut.Text)
+	}
+	if !svc.HasActiveSession("u") {
+		t.Fatal("expected active session after /new")
+	}
+}
+
 func TestHandleMessageGlobalBusyLockOnNormalPrompts(t *testing.T) {
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
@@ -403,15 +462,37 @@ func TestHandleMessagePermissionDenyThenFinalAnswerReturnsFinalOnly(t *testing.T
 }
 
 type stubACPClient struct {
-	mu       sync.Mutex
-	calls    []backend.PromptRequest
-	promptFn func(ctx context.Context, req backend.PromptRequest) (backend.PromptResult, error)
+	mu        sync.Mutex
+	calls     []backend.PromptRequest
+	listCalls []struct{}
+	promptFn  func(ctx context.Context, req backend.PromptRequest) (backend.PromptResult, error)
+	listFn    func(ctx context.Context) (backend.SessionListResult, error)
+	createFn  func(ctx context.Context, req backend.SessionCreateRequest) (backend.SessionInfo, error)
 	health    backend.HealthSnapshot
 }
 
 func (s *stubACPClient) Start(_ context.Context) error { return nil }
 
 func (s *stubACPClient) Stop() error { return nil }
+
+func (s *stubACPClient) ListSessions(ctx context.Context) (backend.SessionListResult, error) {
+	s.mu.Lock()
+	s.listCalls = append(s.listCalls, struct{}{})
+	fn := s.listFn
+	s.mu.Unlock()
+	if fn != nil {
+		return fn(ctx)
+	}
+	return backend.SessionListResult{}, nil
+}
+
+func (s *stubACPClient) CreateSession(ctx context.Context, req backend.SessionCreateRequest) (backend.SessionInfo, error) {
+	fn := s.createFn
+	if fn != nil {
+		return fn(ctx, req)
+	}
+	return backend.SessionInfo{}, nil
+}
 
 func (s *stubACPClient) Prompt(ctx context.Context, req backend.PromptRequest) (backend.PromptResult, error) {
 	s.mu.Lock()

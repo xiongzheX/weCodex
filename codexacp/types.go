@@ -27,6 +27,24 @@ type PromptResult struct {
 	ReplyText string
 }
 
+type SessionInfo struct {
+	SessionID   string `json:"sessionId"`
+	DisplayName string `json:"displayName,omitempty"`
+}
+
+type SessionListResult struct {
+	ActiveSessionID string        `json:"activeSessionId,omitempty"`
+	Sessions        []SessionInfo `json:"sessions,omitempty"`
+}
+
+type SessionCreateRequest struct {
+	SenderID string `json:"senderId"`
+}
+
+type SessionCreateResult struct {
+	Session SessionInfo `json:"session"`
+}
+
 type RPCRequestEnvelope struct {
 	JSONRPC string `json:"jsonrpc"`
 	ID      any    `json:"id,omitempty"`
@@ -198,3 +216,4 @@ type runtimeClient interface {
 	Notifications() <-chan runtimeNotification
 	Errors() <-chan error
 }
+

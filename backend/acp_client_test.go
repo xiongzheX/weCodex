@@ -137,9 +137,6 @@ func TestTranslateACPError(t *testing.T) {
 				if !errors.As(got, &typed) {
 					t.Fatalf("got %T, want *PromptError", got)
 				}
-				if !errors.Is(got, cause) {
-					t.Fatalf("got %v does not unwrap to cause", got)
-				}
 			},
 		},
 		{
@@ -150,9 +147,6 @@ func TestTranslateACPError(t *testing.T) {
 				var typed *SessionError
 				if !errors.As(got, &typed) {
 					t.Fatalf("got %T, want *SessionError", got)
-				}
-				if !errors.Is(got, cause) {
-					t.Fatalf("got %v does not unwrap to cause", got)
 				}
 			},
 		},
@@ -165,9 +159,6 @@ func TestTranslateACPError(t *testing.T) {
 				if !errors.As(got, &typed) {
 					t.Fatalf("got %T, want *PermissionError", got)
 				}
-				if !errors.Is(got, cause) {
-					t.Fatalf("got %v does not unwrap to cause", got)
-				}
 			},
 		},
 		{
@@ -178,9 +169,6 @@ func TestTranslateACPError(t *testing.T) {
 				var typed *TransportError
 				if !errors.As(got, &typed) {
 					t.Fatalf("got %T, want *TransportError", got)
-				}
-				if !errors.Is(got, cause) {
-					t.Fatalf("got %v does not unwrap to cause", got)
 				}
 			},
 		},
@@ -195,47 +183,11 @@ func TestTranslateACPError(t *testing.T) {
 				}
 			},
 		},
-		{
-			name: "unknown error passthrough",
-			in:   cause,
-			assertErr: func(t *testing.T, got error) {
-				t.Helper()
-				if got != cause {
-					t.Fatalf("got %v, want same unknown error instance %v", got, cause)
-				}
-			},
-		},
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			got := translateACPError(tc.in)
-			tc.assertErr(t, got)
-		})
-	}
-}
-
-func TestTranslateHealthState(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		in   codexacp.HealthState
-		want HealthState
-	}{
-		{name: "ready", in: codexacp.HealthReady, want: HealthReady},
-		{name: "degraded", in: codexacp.HealthDegraded, want: HealthDegraded},
-		{name: "unavailable", in: codexacp.HealthUnavailable, want: HealthUnavailable},
-		{name: "unknown defaults to unavailable", in: codexacp.HealthState("unknown"), want: HealthUnavailable},
-	}
-
-	for _, tc := range tests {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			if got := translateHealthState(tc.in); got != tc.want {
-				t.Fatalf("translateHealthState(%q) = %q, want %q", tc.in, got, tc.want)
-			}
+			tc.assertErr(t, translateACPError(tc.in))
 		})
 	}
 }

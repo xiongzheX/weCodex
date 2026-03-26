@@ -11,6 +11,7 @@ func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "wecodex",
 		Short:         "WeChat bridge for Codex runtime",
+		Long:          "weCodex bridges WeChat to a local Codex runtime and lets you manage Codex CLI threads with /new, /list, and /use N.",
 		SilenceErrors: true,
 	}
 	root.AddCommand(statusCmd)

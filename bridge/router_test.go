@@ -34,6 +34,33 @@ func TestParseInputRecognizesStatusAndNewCommands(t *testing.T) {
 	}
 }
 
+func TestParseInputRecognizesListAndUseCommands(t *testing.T) {
+	listInput := ParseInput("/list")
+	if listInput.Kind != InputList {
+		t.Fatalf("expected kind %q, got %q", InputList, listInput.Kind)
+	}
+	if listInput.Text != "" {
+		t.Fatalf("expected empty text for local command, got %q", listInput.Text)
+	}
+	if listInput.UseIndex != nil {
+		t.Fatalf("expected no use index for /list, got %v", *listInput.UseIndex)
+	}
+
+	useInput := ParseInput("/use 12")
+	if useInput.Kind != InputUse {
+		t.Fatalf("expected kind %q, got %q", InputUse, useInput.Kind)
+	}
+	if useInput.Text != "" {
+		t.Fatalf("expected empty text for local command, got %q", useInput.Text)
+	}
+	if useInput.UseIndex == nil {
+		t.Fatalf("expected use index for /use 12")
+	}
+	if got, want := *useInput.UseIndex, 12; got != want {
+		t.Fatalf("expected use index %d, got %d", want, got)
+	}
+}
+
 func TestParseInputTreatsUnknownSlashCommandAsPromptText(t *testing.T) {
 	got := ParseInput("/unknown keep as-is")
 
@@ -48,7 +75,7 @@ func TestParseInputTreatsUnknownSlashCommandAsPromptText(t *testing.T) {
 func TestBuildHelpTextIncludesLocalCommands(t *testing.T) {
 	help := BuildHelpText()
 
-	for _, cmd := range []string{"/help", "/status", "/new"} {
+	for _, cmd := range []string{"/help", "/status", "/new", "/list", "/use N"} {
 		if !strings.Contains(help, cmd) {
 			t.Fatalf("expected help text to include %q, got %q", cmd, help)
 		}
@@ -58,7 +85,7 @@ func TestBuildHelpTextIncludesLocalCommands(t *testing.T) {
 func TestBuildRuntimeStatusWithoutLastErrorSummary(t *testing.T) {
 	status := RuntimeStatus{
 		BridgeMode:       "running",
-		BackendState:         "ready",
+		BackendState:     "ready",
 		HasActiveSession: true,
 		PermissionMode:   "read-only",
 	}
@@ -75,7 +102,7 @@ func TestBuildRuntimeStatusWithoutLastErrorSummary(t *testing.T) {
 func TestBuildRuntimeStatusWithLastErrorSummary(t *testing.T) {
 	status := RuntimeStatus{
 		BridgeMode:       "running",
-		BackendState:         "degraded",
+		BackendState:     "degraded",
 		HasActiveSession: false,
 		PermissionMode:   "read-only",
 		LastErrorSummary: "rpc timeout",

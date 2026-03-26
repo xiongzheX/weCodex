@@ -36,6 +36,17 @@ func (c *acpClient) Stop() error {
 	return nil
 }
 
+func (c *acpClient) ListSessions(ctx context.Context) (SessionListResult, error) {
+	_ = ctx
+	return SessionListResult{}, errors.New("session listing not supported by ACP backend")
+}
+
+func (c *acpClient) CreateSession(ctx context.Context, req SessionCreateRequest) (SessionInfo, error) {
+	_ = ctx
+	_ = req
+	return SessionInfo{}, errors.New("session creation not supported by ACP backend")
+}
+
 func (c *acpClient) Prompt(ctx context.Context, req PromptRequest) (PromptResult, error) {
 	res, err := c.inner.Prompt(ctx, codexacp.PromptRequest{
 		SenderID:  req.SenderID,

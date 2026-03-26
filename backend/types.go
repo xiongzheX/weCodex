@@ -9,6 +9,8 @@ import (
 type Client interface {
 	Start(ctx context.Context) error
 	Stop() error
+	ListSessions(ctx context.Context) (SessionListResult, error)
+	CreateSession(ctx context.Context, req SessionCreateRequest) (SessionInfo, error)
 	Prompt(ctx context.Context, req PromptRequest) (PromptResult, error)
 	Health() HealthSnapshot
 }
@@ -23,6 +25,20 @@ type PromptRequest struct {
 type PromptResult struct {
 	SessionID string
 	ReplyText string
+}
+
+type SessionInfo struct {
+	SessionID   string
+	DisplayName string
+}
+
+type SessionListResult struct {
+	ActiveSessionID string
+	Sessions        []SessionInfo
+}
+
+type SessionCreateRequest struct {
+	SenderID string
 }
 
 type HealthState string
